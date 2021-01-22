@@ -83,6 +83,7 @@ def RSI(prices, current_only=False, period = 7):
     # Returns a list of RSI values
     return rsi
     
+
 class RobinTrader:
     """ Class to handle trading instance """
     def __init__(self, username, password):
@@ -161,6 +162,7 @@ class RobinTrader:
         if DEBUG_INFO: print(info)
 
         buy_amount = min(cash_on_hand, MAX_DOLLARS_PER_TRADE)
+        print(f"Buying ${buy_amount} worth of {symbol}")
         info = rh.order_buy_crypto_by_price("ETH", buy_amount)
         if DEBUG_INFO: print(info)
         ### info looks like e.g.
