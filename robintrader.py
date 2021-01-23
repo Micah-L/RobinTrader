@@ -8,6 +8,7 @@ import time
 # Imports for installed modules:
 import robin_stocks as rh
 import pandas as pd
+# from pprint import pprint
 # import pickle # (not yet used)
 
 try:
@@ -31,20 +32,30 @@ except ModuleNotFoundError:
 
     ## Strategy related ##
 
+    # Percentage above cost basis before taking profit by selling position
+    # Change to None to disable
+    TAKE_PROFIT_PERCENT = 0.45
+    # TAKE_PROFIT_PERCENT = None
+    
+    # Percentage below cost basis before stopping loss by selling position
+    # Change to None to disable
+    STOP_LOSS_PERCENT = 0.45
+    # STOP_LOSS_PERCENT = None
+
     # Set RSI levels to buy/sell at
     DEFAULT_RSI_BUY_AT = 30
     DEFAULT_RSI_SELL_AT = 70    
 
     # If this is non-zero, the rsi buy or sell levels will be adjusted down or up after each buy or sell.
     # Set higher to take advantage of longer price movements in one direction
-    RSI_STEP_WHEN_TRIGGERED = 10
+    RSI_STEP_WHEN_TRIGGERED = 5
     # The rate (in RSI/second) to adjust the RSI cutoffs back towards the default levels.
     # Set lower to take advantage of longer price movements in one direction
-    RSI_ADJUST_RESET_SPEED = 0.002
+    RSI_ADJUST_RESET_SPEED = 0.01
 
     # per individual trade
-    MIN_DOLLARS_PER_TRADE = 2
-    MAX_DOLLARS_PER_TRADE = 5
+    MIN_DOLLARS_PER_TRADE = 2.25
+    MAX_DOLLARS_PER_TRADE = 5.50
 
     # How much money to allocate to the RSI strategy at first.
     # Profits will be continue to be traded.
@@ -181,35 +192,56 @@ class RobinTrader:
         print(f"RSI: {round(rsi,4)}\tCutoffs: {round(self.rsi_buy_at,3)}/{round(self.rsi_sell_at,3)}")
         cash = self.check_cash_on_hand()
         quote = float(rh.get_crypto_quote(symbol)['bid_price'])
-        quantity = float( list(filter(lambda x: x['currency']['code'] == symbol, rh.get_crypto_positions()))[0]['quantity'] )
-        print(f"Assets: {round(cash,2)} USD\t\t{quantity} {symbol}")
+        crypto_positions = rh.get_crypto_positions()
+        quantity = float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['quantity'] )
+        cost_basis = float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['cost_bases'][0]['direct_cost_basis'] )
+        try:
+            pnl_percent = 100*(quote*quantity - cost_basis)/cost_basis
+        except ZeroDivisionError:
+            pnl_percent = 0
+        sign = "+" if pnl_percent >= 0 else ""
+        print(f"Assets:\n\t{round(cash,2)} USD\n\t{round(quantity,6)} {symbol}\t Value: ${round(quote*quantity,2)} ({sign}{round(pnl_percent,2)}%)\tCost: ${round(cost_basis,2)}")
         print(f"Total Value: ${round(cash + quote*quantity,2)}")
+        #print(f"Cost Basis of {symbol}: {cost_basis}")
+        #print(f"Value of {symbol}: {quote*quantity}")
+        
+        # Check for stop loss / take profits:
+        if TAKE_PROFIT_PERCENT is not None and pnl_percent > TAKE_PROFIT_PERCENT:
+            info = rh.order_sell_crypto_limit(symbol, quantity, round(0.999*quote,2))
+            print(f"Take profit triggered!  Selling {symbol}")
+            # pprint(info)
+            return # skip checking rsi this time around
+            
+        elif STOP_LOSS_PERCENT is not None and pnl_percent < -1*STOP_LOSS_PERCENT:
+            info = rh.order_sell_crypto_limit(symbol, quantity, round(0.995*quote, 2))
+            # rh.order_sell_crypto_by_quantity(symbol, round(quantity,6))
+            print(f"Stop loss triggered! Selling {symbol}")
+            # Step RSI buy cutoff down so we don't buy again right away
+            self.rsi_buy_at = max(0, self.rsi_buy_at - RSI_STEP_WHEN_TRIGGERED)
+            # pprint(info)
+            return # skip checking rsi
+        
+        # Check for RSI
         if rsi <= self.rsi_buy_at:
             self.trigger_buy(symbol=symbol)
         elif rsi >= self.rsi_sell_at:
             self.trigger_sell(symbol=symbol)
             
-    def trigger_buy(self, symbol):
+    def trigger_buy(self, symbol, buy_amount = None):
         print("Buy triggered!")
         cash_on_hand = self.check_cash_on_hand()
-        # print(f"Have ${cash_on_hand}")
         if cash_on_hand < MIN_DOLLARS_PER_TRADE:
             print(f"Not enough to cash buy {symbol}.")
             return
         
-        info = rh.get_crypto_info(symbol)
-        if DEBUG_INFO: print(info)
-
-        buy_amount = min(cash_on_hand, MAX_DOLLARS_PER_TRADE)
+        # info = rh.get_crypto_info(symbol)
+        # if DEBUG_INFO: print(info)
+        if buy_amount is None:
+            buy_amount = min(cash_on_hand, MAX_DOLLARS_PER_TRADE)
         print(f"Buying ${buy_amount} worth of {symbol}")
         info = rh.order_buy_crypto_by_price("ETH", buy_amount)
         if DEBUG_INFO: print(info)
-        ### info looks like e.g.
-        # {'account_id': '0123456789-abcd-ef01-2345-67890abcdef', 'average_price': None, 'cancel_url': 'https://nummus.robinhood.com/orders/111111-2222-3333-4444-567890abcdef/cancel/', 'created_at': '2021-01-21T23:19:54.976785-05:00', 'cumulative_quantity': '0.000000000000000000', 'currency_pair_id': '76637d50-c702-4ed1-bcb5-5b0732a81f48', 'executions': [], 'id': '111111-2222-3333-4444-567890abcdef', 'last_transaction_at': None, 'price': '1177.840000000000000000', 'quantity': '0.021200000000000000', 'ref_id': '543210f-edcb-aaaa-bbbb-01234543210', 'rounded_executed_notional': '0.00', 'side': 'buy', 'state': 'unconfirmed', 'time_in_force': 'gtc', 'type': 'market', 'updated_at': '2021-01-21T23:19:55.196963-05:00'}
-        # or 
-        # {'non_field_errors': ['Insufficient holdings.']}
-        # or 
-        # {'quantity': ['Order quantity is too small.']}
+
         if 'non_field_errors' in info.keys():
             # Probably insufficient money...
             if DEBUG_INFO: print(f"Error(s): {info['non_field_errors']}")
@@ -222,7 +254,7 @@ class RobinTrader:
         # Decrease rsi buy level
         self.rsi_buy_at = max(0, self.rsi_buy_at - RSI_STEP_WHEN_TRIGGERED)
         return
-    def trigger_sell(self, symbol):
+    def trigger_sell(self, symbol, sell_amount = None):
         print("Sell triggered!")
         
         quantity = float( list(filter(lambda x: x['currency']['code'] == symbol, rh.get_crypto_positions()))[0]['quantity'] )
@@ -234,7 +266,7 @@ class RobinTrader:
         
         print(f"Selling {quantity} of {symbol}")
         if quote*quantity < MIN_DOLLARS_PER_TRADE:
-            print(f"Value of {symbol} below minimum. Skipping.")
+            print(f"Amount of {symbol} below minimum. Skipping.")
             return
         
         info = rh.order_sell_crypto_by_quantity(symbol, quantity)
