@@ -160,13 +160,12 @@ class RobinTrader:
         
         i = 0
         while i < loops:
-            if DEBUG_INFO:
-                print(f"Loop {i+1}")
-            
+            if DEBUG_INFO: print(f"Loop {i+1}")
             try:
                 self.rsi_based_buy_sell(symbol = "ETH")
-            except TypeError:
-                # Probably 504 server error, and robin_stocks tried subscript NoneType object
+            except (TypeError, KeyError):
+                # Probably 504 server error, and robin_stocks tried subscript NoneType object 
+                # or KeyError
                 print("Server busy. Waiting 10s to retry.")
                 time.sleep(10)
             
