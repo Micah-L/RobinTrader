@@ -160,7 +160,7 @@ class RobinTrader:
         
         i = 0
         while i < loops:
-            if DEBUG_INFO: print(f"Loop {i+1}")
+            # if DEBUG_INFO: print(f"Loop {i+1}")
             try:
                 self.rsi_based_buy_sell(symbol = "ETH")
             except (TypeError, KeyError):
