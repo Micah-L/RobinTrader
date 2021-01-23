@@ -1,6 +1,6 @@
 #Use with Python3
 #Installation:
-#pip install robin_stocks pandas
+#pip install robin_stocks pandas pickle
 
 # Imports for builtin modules:
 import time
@@ -8,42 +8,61 @@ import time
 # Imports for installed modules:
 import robin_stocks as rh
 import pandas as pd
+# import pickle # (not yet used)
 
-### Constants ###
-#  ~~~~~~~~~~~  #
+try:
+    # uncomment this line to force builtin constants in next block, or don't include config.py file
+    # raise ModuleNotFoundError 
+    from config import *
+except ModuleNotFoundError:
+    # If config.py is not available, this program uses the constants below.
+    # Consider copying your settings to config.py so that it is easier
+    # to save settings between updates.
+    ### Constants ###
+    #  ~~~~~~~~~~~  #
 
-## Account related ##
-USERNAME = "replace this string with your username" 
-PASSWORD = "replace with your password" 
+    ## Account related ## 
+    # Replace with your Robinhood login info
+    USERNAME = "YourUsernameHere"
+    PASSWORD = "YourPasswordHere" 
 
-# Set True to do 2fa by SMS, or False to do 2fa by email.
-TWO_FACTOR_IS_SMS = False
+    # Set True to do 2fa by SMS, or False to do 2fa by email.
+    TWO_FACTOR_IS_SMS = False
 
-## Strategy related ##
+    ## Strategy related ##
 
-# Set RSI levels to buy/sell at
-DEFAULT_RSI_BUY_AT = 30
-DEFAULT_RSI_SELL_AT = 70
+    # Set RSI levels to buy/sell at
+    DEFAULT_RSI_BUY_AT = 30
+    DEFAULT_RSI_SELL_AT = 70    
 
-# per individual trade
-MIN_DOLLARS_PER_TRADE = 2
-MAX_DOLLARS_PER_TRADE = 7 
+    # If this is non-zero, the rsi buy or sell levels will be adjusted down or up after each buy or sell.
+    # Set higher to take advantage of longer price movements in one direction
+    RSI_STEP_WHEN_TRIGGERED = 10
+    # The rate (in RSI/second) to adjust the RSI cutoffs back towards the default levels.
+    # Set lower to take advantage of longer price movements in one direction
+    RSI_ADJUST_RESET_SPEED = 0.002
 
-# How much money to allocate to the RSI strategy at first.
-# Profits will be continue to be traded.
-# DEFAULT_DOLLAR_ALLOCATION = 25.00 # in dollars. Not currently used. Assuming using whole account
+    # per individual trade
+    MIN_DOLLARS_PER_TRADE = 2
+    MAX_DOLLARS_PER_TRADE = 5
+
+    # How much money to allocate to the RSI strategy at first.
+    # Profits will be continue to be traded.
+    # DEFAULT_DOLLAR_ALLOCATION = 25.00 # in dollars. Not currently used. Assuming using whole account
 
 
-## Misc settings ##
+    ## Misc settings ##
 
-# Time to wait between loops (seconds)
-MAIN_LOOP_SLEEP_TIME = 7
+    # Time to wait between loops (seconds)
+    MAIN_LOOP_SLEEP_TIME = 5
 
-# If true, print extra information to console
-DEBUG_INFO = False
+    # If true, print extra information to console
+    DEBUG_INFO = False
 
-###~#~#~#~#~#~###
+    ###~#~#~#~#~#~###
 
+
+# Useful functions
 def RSI(prices, current_only=False, period = 7):
     """ Calculate RSI and return the values as a pandas DataFrame.
     
@@ -82,15 +101,19 @@ def RSI(prices, current_only=False, period = 7):
         return rsi.iloc[-1]
     # Returns a list of RSI values
     return rsi
-    
+
 
 class RobinTrader:
     """ Class to handle trading instance """
-    def __init__(self, username, password):
+    def __init__(self, username, password, starting_rsi_buy_at = DEFAULT_RSI_BUY_AT, starting_rsi_sell_at = DEFAULT_RSI_SELL_AT):
         self.username = username
         self.password = password
         
         self.cash_on_hand = None
+        
+        self.rsi_buy_at = starting_rsi_buy_at
+        self.rsi_sell_at = starting_rsi_sell_at
+        
         
         rh.login(username=username, password=password, expiresIn=86400, by_sms=TWO_FACTOR_IS_SMS)
     def check_cash_on_hand(self):
@@ -128,13 +151,23 @@ class RobinTrader:
         while i < loops:
             if DEBUG_INFO:
                 print(f"Loop {i+1}")
-                
+            
             self.rsi_based_buy_sell(symbol = "ETH")
             
+            
+            
+            
+            
+            #Adjust RSI buy/sell levels towards the defaults.
+            # increase the buy level, but no more than the default
+            self.rsi_buy_at = min(DEFAULT_RSI_BUY_AT, self.rsi_buy_at + MAIN_LOOP_SLEEP_TIME*RSI_ADJUST_RESET_SPEED)
+            # decrease the sell level, but no less than the default
+            self.rsi_sell_at = max(DEFAULT_RSI_SELL_AT, self.rsi_sell_at - MAIN_LOOP_SLEEP_TIME*RSI_ADJUST_RESET_SPEED)
+            print("")
             time.sleep(sleep_time)
             i += 1
 
-    def rsi_based_buy_sell(self, symbol, rsi_buy_at = DEFAULT_RSI_BUY_AT, rsi_sell_at = DEFAULT_RSI_SELL_AT):
+    def rsi_based_buy_sell(self, symbol):
         """ Check the RSI and possibly place a buy or sell order """
         
         # Check the RSI
@@ -145,15 +178,21 @@ class RobinTrader:
         df["close_price"] = pd.to_numeric(df["close_price"], errors='coerce') 
         # Get the current RSI
         rsi = RSI(df["close_price"], current_only=True)
-        print(f"RSI: {rsi}")
-        if rsi <= rsi_buy_at:
+        print(f"RSI: {round(rsi,4)}\tCutoffs: {round(self.rsi_buy_at,3)}/{round(self.rsi_sell_at,3)}")
+        cash = self.check_cash_on_hand()
+        quote = float(rh.get_crypto_quote(symbol)['bid_price'])
+        quantity = float( list(filter(lambda x: x['currency']['code'] == symbol, rh.get_crypto_positions()))[0]['quantity'] )
+        print(f"Assets: {round(cash,2)} USD\t\t{quantity} {symbol}")
+        print(f"Total Value: ${round(cash + quote*quantity,2)}")
+        if rsi <= self.rsi_buy_at:
             self.trigger_buy(symbol=symbol)
-        elif rsi >= rsi_sell_at:
+        elif rsi >= self.rsi_sell_at:
             self.trigger_sell(symbol=symbol)
+            
     def trigger_buy(self, symbol):
         print("Buy triggered!")
         cash_on_hand = self.check_cash_on_hand()
-        print(f"Have ${cash_on_hand}")
+        # print(f"Have ${cash_on_hand}")
         if cash_on_hand < MIN_DOLLARS_PER_TRADE:
             print(f"Not enough to cash buy {symbol}.")
             return
@@ -180,14 +219,14 @@ class RobinTrader:
         else:
             # Probably worked
             pass
-        
+        # Decrease rsi buy level
+        self.rsi_buy_at = max(0, self.rsi_buy_at - RSI_STEP_WHEN_TRIGGERED)
         return
     def trigger_sell(self, symbol):
         print("Sell triggered!")
         
-        info = rh.get_crypto_positions()
-        quantity = float( list(filter(lambda x: x['currency']['code'] == symbol, info))[0]['quantity'] )
-        print(f"Have {quantity} {symbol}")
+        quantity = float( list(filter(lambda x: x['currency']['code'] == symbol, rh.get_crypto_positions()))[0]['quantity'] )
+        # print(f"Have {quantity} {symbol}")
         quote = float(rh.get_crypto_quote(symbol)['bid_price'])
         
         if quote*quantity >= MAX_DOLLARS_PER_TRADE:
@@ -202,6 +241,9 @@ class RobinTrader:
         
         if DEBUG_INFO: print(info)
         
+        
+        # Increase rsi sell level
+        self.rsi_sell_at = min(100, self.rsi_sell_at + RSI_STEP_WHEN_TRIGGERED)
         return 
     
 def main():
