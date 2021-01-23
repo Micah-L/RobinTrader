@@ -39,7 +39,7 @@ except ModuleNotFoundError:
     
     # Percentage below cost basis before stopping loss by selling position
     # Change to None to disable
-    STOP_LOSS_PERCENT = 2
+    STOP_LOSS_PERCENT = 0.45
     # STOP_LOSS_PERCENT = None
 
     # Set RSI levels to buy/sell at
@@ -163,7 +163,12 @@ class RobinTrader:
             if DEBUG_INFO:
                 print(f"Loop {i+1}")
             
-            self.rsi_based_buy_sell(symbol = "ETH")
+            try:
+                self.rsi_based_buy_sell(symbol = "ETH")
+            except TypeError:
+                # Probably 504 server error, and robin_stocks tried subscript NoneType object
+                print("Server busy. Waiting 10s to retry.")
+                time.sleep(10)
             
             
             
