@@ -1,80 +1,116 @@
 #Use with Python3
 #Installation:
-#pip install robin_stocks pandas pickle
+#pip install robin_stocks pandas
+
+
+###   Constants   ###
+###~~~~~~~~~~~~~~~###
+
+## Account related ## 
+# Replace with your Robinhood login info
+USERNAME = "YourUsernameHere"
+PASSWORD = "YourPasswordHere" 
+
+# Set True to do 2fa by SMS, or False to do 2fa by email.
+TWO_FACTOR_IS_SMS = True
+
+## Strategy related ##
+
+# Create a list of symbols to trade
+# To only trade one symbol:
+# SYMBOLS = ['ETH']
+# To trade multiple symbols:
+SYMBOLS = ['ETH', 'ETC', 'LTC']
+# SYMBOLS = ['ETH', 'ETC', 'LTC', 'DOGE']
+ 
+# program will cancel all crypto orders older than this many seconds
+DEFAULT_STALE_ORDER_AGE = 90
+ 
+TAKE_PROFIT_PERCENT = 1.5
+# TAKE_PROFIT_PERCENT = None
+STOP_LOSS_PERCENT = 1
+# STOP_LOSS_PERCENT = None
+
+# Period for RSI calculation (number of data frames)
+RSI_PERIOD = 7
+# Size of data frame for calculating RSI
+# Can be '15second', '5minute', '10minute', 'hour', 'day', or 'week'
+# '15second' may result in an error
+RSI_WINDOW = '5minute'
+# The entire time frame to collect data points. Can be 'hour', 'day', 'week', 'month', '3month', 'year', or '5year'
+# If the span is too small to fit RSI_PERIOD number of RSI_WINDOWs then there will be an error
+RSI_SPAN = "day"
+
+# Set RSI levels to buy/sell at
+DEFAULT_RSI_BUY_AT = 30
+DEFAULT_RSI_SELL_AT = 70
+
+# If this is non-zero, the rsi buy or sell levels will be adjusted down or up after each buy or sell.
+# Set higher to take advantage of longer price movements in one direction
+RSI_STEP_BUY_WHEN_TRIGGERED = 8
+RSI_STEP_SELL_WHEN_TRIGGERED = 16
+# The rate (in RSI/second) to adjust the RSI cutoffs back towards the default levels.
+# Set lower to take advantage of longer price movements in one direction
+RSI_RESET_BUY_SPEED = 0.02
+RSI_RESET_SELL_SPEED = 0.05
+
+
+# per individual trade
+MIN_DOLLARS_PER_TRADE = 2.00
+MAX_DOLLARS_PER_TRADE = 3.50
+
+## Misc settings ##
+
+# Time to wait between loops (seconds)
+MAIN_LOOP_SLEEP_TIME = 6.15
+
+# If true, print extra information to console
+DEBUG_INFO = False
+
+# END CONSTANTS #
+###~#~#~#~#~#~###
+
 
 # Imports for builtin modules:
+from collections import defaultdict
+import datetime
+from dateutil.parser import parse as datetime_parser
 import time
+import logging
+FORMAT = '%(asctime)-15s%(message)s'
+logging.basicConfig(filename='trades.log', encoding='utf-8', level=logging.INFO, format = FORMAT)
+
+from io import StringIO 
+import sys
+
+class Capturing(list):
+    def __enter__(self):
+        self._stdout = sys.stdout
+        sys.stdout = self._stringio = StringIO()
+        return self
+    def __exit__(self, *args):
+        self.extend(self._stringio.getvalue().splitlines())
+        del self._stringio    # free up some memory
+        sys.stdout = self._stdout
+# Usage:
+# with Capturing() as output:
+    # do_something(my_object)
 
 # Imports for installed modules:
 import robin_stocks as rh
 import pandas as pd
-# from pprint import pprint
+# from pprint import pprint # (mostly for debugging)
 # import pickle # (not yet used)
 
+# You may place the above constants in a file called "config.py" to override the defaults.
 try:
-    # uncomment this line to force builtin constants in next block, or don't include config.py file
-    # raise ModuleNotFoundError 
     from config import *
 except ModuleNotFoundError:
-    # If config.py is not available, this program uses the constants below.
-    # Consider copying your settings to config.py so that it is easier
-    # to save settings between updates.
-    ### Constants ###
-    #  ~~~~~~~~~~~  #
-
-    ## Account related ## 
-    # Replace with your Robinhood login info
-    USERNAME = "YourUsernameHere"
-    PASSWORD = "YourPasswordHere" 
-
-    # Set True to do 2fa by SMS, or False to do 2fa by email.
-    TWO_FACTOR_IS_SMS = False
-
-    ## Strategy related ##
-
-    # Percentage above cost basis before taking profit by selling position
-    # Change to None to disable
-    TAKE_PROFIT_PERCENT = 0.45
-    # TAKE_PROFIT_PERCENT = None
-    
-    # Percentage below cost basis before stopping loss by selling position
-    # Change to None to disable
-    STOP_LOSS_PERCENT = 0.45
-    # STOP_LOSS_PERCENT = None
-
-    # Set RSI levels to buy/sell at
-    DEFAULT_RSI_BUY_AT = 30
-    DEFAULT_RSI_SELL_AT = 70    
-
-    # If this is non-zero, the rsi buy or sell levels will be adjusted down or up after each buy or sell.
-    # Set higher to take advantage of longer price movements in one direction
-    RSI_STEP_WHEN_TRIGGERED = 5
-    # The rate (in RSI/second) to adjust the RSI cutoffs back towards the default levels.
-    # Set lower to take advantage of longer price movements in one direction
-    RSI_ADJUST_RESET_SPEED = 0.01
-
-    # per individual trade
-    MIN_DOLLARS_PER_TRADE = 2.25
-    MAX_DOLLARS_PER_TRADE = 5.50
-
-    # How much money to allocate to the RSI strategy at first.
-    # Profits will be continue to be traded.
-    # DEFAULT_DOLLAR_ALLOCATION = 25.00 # in dollars. Not currently used. Assuming using whole account
-
-
-    ## Misc settings ##
-
-    # Time to wait between loops (seconds)
-    MAIN_LOOP_SLEEP_TIME = 5
-
-    # If true, print extra information to console
-    DEBUG_INFO = False
-
-    ###~#~#~#~#~#~###
+    pass
 
 
 # Useful functions
-def RSI(prices, current_only=False, period = 7):
+def RSI(prices, current_only=False, period = RSI_PERIOD):
     """ Calculate RSI and return the values as a pandas DataFrame.
     
     prices -- should be a pandas DataFrame containing price info
@@ -112,7 +148,13 @@ def RSI(prices, current_only=False, period = 7):
         return rsi.iloc[-1]
     # Returns a list of RSI values
     return rsi
-
+def float_to_ndigits(f):
+    """ f must be a multiple of 10 """
+    ndigits = 0
+    while f < 1:
+        ndigits += 1
+        f *= 10
+    return ndigits
 
 class RobinTrader:
     """ Class to handle trading instance """
@@ -120,174 +162,271 @@ class RobinTrader:
         self.username = username
         self.password = password
         
-        self.cash_on_hand = None
+        self.starting_total_value = None
+        self.total_trades = 0
+        self.up_since = time.time()
         
-        self.rsi_buy_at = starting_rsi_buy_at
-        self.rsi_sell_at = starting_rsi_sell_at
+        self.increments = defaultdict(int) # {symbol : increment (int)}
         
+        self.order_ids = dict() # {time : id} pairs
+        
+        self.starting_rsi_buy_at = starting_rsi_buy_at
+        self.starting_rsi_sell_at = starting_rsi_sell_at
+        
+        self.rsi_buy_at = dict()
+        self.rsi_sell_at = dict()
+        
+        # stores the last time the rsi_based_buy_sell function was run with [symbol]
+        self.last_time = dict()
         
         rh.login(username=username, password=password, expiresIn=86400, by_sms=TWO_FACTOR_IS_SMS)
-    def check_cash_on_hand(self):
-        info = pd.DataFrame(rh.load_phoenix_account())
-        if DEBUG_INFO: print(info)
-        # keys are 
-        """['account_buying_power', 'cash_available_from_instant_deposits',
-       'cash_held_for_currency_orders', 'cash_held_for_dividends',
-       'cash_held_for_equity_orders', 'cash_held_for_options_collateral',
-       'cash_held_for_orders', 'crypto', 'crypto_buying_power', 'equities',
-       'extended_hours_portfolio_equity', 'instant_allocated',
-       'levered_amount', 'near_margin_call', 'options_buying_power',
-       'portfolio_equity', 'portfolio_previous_close', 'previous_close',
-       'regular_hours_portfolio_equity', 'total_equity',
-       'total_extended_hours_equity', 'total_extended_hours_market_value',
-       'total_market_value', 'total_regular_hours_equity',
-       'total_regular_hours_market_value', 'uninvested_cash',
-       'withdrawable_cash']"""
-        uninvested_cash = float(info['uninvested_cash']['amount'])
-        # print(f"uninvested_cash: ${uninvested_cash}")
-        cash_on_hand = uninvested_cash
         
-        # TODO:
-        # If we want to separate this bot from the rest of the acct, then we will need to 
-        # do other calculations here based on orders placed and total amount willing to invest.
-        # If we're fine using the entire account balancefor this bot, then we only need 
-        # to return the uninvested_cash.
+        self.load_active_crypto_orders()
         
+    def check_cash_on_hand(self, symbol = "USD"):
+        cash_on_hand = 0
+        if symbol == "USD":
+            info = rh.load_phoenix_account()
+            cash_on_hand = float(info['uninvested_cash']['amount'])
+            
+            # TODO:
+            # If we want to separate this bot from the rest of the acct, then we will need to 
+            # do other calculations here based on orders placed and total amount willing to invest.
+            # If we're fine using the entire account balancefor this bot, then we only need 
+            # to return the uninvested_cash.
+        else:
+            crypto_on_hand = dict()
+            crypto_positions = rh.get_crypto_positions()
+            if symbol not in self.increments.keys():
+                self.increments[symbol] = float_to_ndigits(float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['currency']['increment'] ))
+            try:
+                crypto_on_hand['cost'] = float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['cost_bases'][0]['direct_cost_basis'] )
+            except IndexError:
+                crypto_on_hand['cost'] = 0
+            try:
+                crypto_on_hand['quantity'] = float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['quantity'] )
+            except IndexError:
+                crypto_on_hand['quantity'] = 0
+            crypto_on_hand['quote'] = float(rh.get_crypto_quote(symbol)['bid_price'])
+            crypto_on_hand['value'] = crypto_on_hand['quote']*crypto_on_hand['quantity']
+            
+            cash_on_hand = crypto_on_hand
+            
         return cash_on_hand
-        
+    def cancel_old_crypto_orders(self, age = DEFAULT_STALE_ORDER_AGE):
+        to_remove = set()
+        # if DEBUG_INFO: pprint(self.order_ids)
+        for t in self.order_ids.keys():
+            if time.time() - t > DEFAULT_STALE_ORDER_AGE:
+                info = rh.cancel_crypto_order(self.order_ids[t])
+                # if DEBUG_INFO: pprint(info)
+                to_remove.add(t)
+        for t in to_remove:
+            del self.order_ids[t]      
+    def load_active_crypto_orders(self):
+        info = rh.get_all_open_crypto_orders() 
+        for i in info:
+            self.order_ids[datetime_parser(i['created_at']).timestamp()] = i['id']
+        print(self.order_ids)
     def mainloop(self, sleep_time = MAIN_LOOP_SLEEP_TIME, loops = float("Inf")):
         """  """
         
         i = 0
+        last_time=time.time()
         while i < loops:
             # if DEBUG_INFO: print(f"Loop {i+1}")
             try:
-                self.rsi_based_buy_sell(symbol = "ETH")
-            except (TypeError, KeyError):
+                outputs = []
+                for symbol in SYMBOLS:
+                    with Capturing() as output:
+                        self.rsi_based_buy_sell(symbol = symbol)
+                    outputs.append(output)
+                
+                print(f"{time.ctime()}\tUptime: {datetime.timedelta(seconds = int(time.time()-self.up_since))}\t\tTrades: {self.total_trades}")
+                for o in outputs[0][0:2]:
+                    print(o)
+                total_value = float(outputs[0][1].split('\t')[3][1:])
+                for out in outputs:
+                    print(out[2])
+                    total_value += float(out[2].split('\t')[3][1:])
+                if self.starting_total_value is None:
+                    self.starting_total_value = total_value
+                diff = total_value - self.starting_total_value
+                sign = "+" if diff >= 0 else "-"
+                diff = abs(diff)
+                print(f"Total Value:\t${total_value:.2f}\t\tChange:\t{sign}${diff:.2f}")
+
+                for out in outputs:
+                    for o in out[3:]:
+                        print(o)
+                for _ in range(max(0,3-len(out[3:]))):
+                    print("")
+                       
+                self.cancel_old_crypto_orders()
+            
+            except (TypeError, KeyError, TimeoutError):
                 # Probably 504 server error, and robin_stocks tried subscript NoneType object 
                 # or KeyError
-                print("Server busy. Waiting 10s to retry.")
-                time.sleep(10)
+                print(f"Server busy. Waiting {MAIN_LOOP_SLEEP_TIME}s to retry.")
+                time.sleep(MAIN_LOOP_SLEEP_TIME)
             
-            
-            
-            
-            
-            #Adjust RSI buy/sell levels towards the defaults.
-            # increase the buy level, but no more than the default
-            self.rsi_buy_at = min(DEFAULT_RSI_BUY_AT, self.rsi_buy_at + MAIN_LOOP_SLEEP_TIME*RSI_ADJUST_RESET_SPEED)
-            # decrease the sell level, but no less than the default
-            self.rsi_sell_at = max(DEFAULT_RSI_SELL_AT, self.rsi_sell_at - MAIN_LOOP_SLEEP_TIME*RSI_ADJUST_RESET_SPEED)
+
             print("")
             time.sleep(sleep_time)
             i += 1
-
     def rsi_based_buy_sell(self, symbol):
         """ Check the RSI and possibly place a buy or sell order """
         
-        # Check the RSI
-        historical_data = rh.get_crypto_historicals(symbol=symbol, interval="5minute", span="hour", bounds="24_7", info=None)
-        df = pd.DataFrame(historical_data)
+        if symbol not in self.rsi_buy_at.keys():
+            self.rsi_buy_at[symbol] = self.starting_rsi_buy_at
+        if symbol not in self.rsi_sell_at.keys():
+            self.rsi_sell_at[symbol] = self.starting_rsi_sell_at
+        if symbol not in self.last_time.keys():
+            self.last_time[symbol] = time.time()
         
+        ## Check the RSI ##
+        historical_data = rh.get_crypto_historicals(symbol=symbol, interval=RSI_WINDOW, span=RSI_SPAN, bounds="24_7", info=None)
+        df = pd.DataFrame(historical_data)
         # convert prices to float since values are given as strings
         df["close_price"] = pd.to_numeric(df["close_price"], errors='coerce') 
         # Get the current RSI
         rsi = RSI(df["close_price"], current_only=True)
-        print(f"RSI: {round(rsi,4)}\tCutoffs: {round(self.rsi_buy_at,3)}/{round(self.rsi_sell_at,3)}")
+        
         cash = self.check_cash_on_hand()
-        quote = float(rh.get_crypto_quote(symbol)['bid_price'])
-        crypto_positions = rh.get_crypto_positions()
-        quantity = float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['quantity'] )
-        cost_basis = float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['cost_bases'][0]['direct_cost_basis'] )
+        crypto_on_hand = self.check_cash_on_hand(symbol = symbol)
+        quote = crypto_on_hand['quote']
+        quantity = crypto_on_hand['quantity']
+        cost_basis = crypto_on_hand['cost']
         try:
             pnl_percent = 100*(quote*quantity - cost_basis)/cost_basis
         except ZeroDivisionError:
             pnl_percent = 0
         sign = "+" if pnl_percent >= 0 else ""
-        print(f"Assets:\n\t{round(cash,2)} USD\n\t{round(quantity,6)} {symbol}\t Value: ${round(quote*quantity,2)} ({sign}{round(pnl_percent,2)}%)\tCost: ${round(cost_basis,2)}")
-        print(f"Total Value: ${round(cash + quote*quantity,2)}")
-        #print(f"Cost Basis of {symbol}: {cost_basis}")
-        #print(f"Value of {symbol}: {quote*quantity}")
+        print("Sym\tQuote\tQty\tVal\tPnL\tCost\tRSI\tBuy@\tSell@")
+        print(f"USD\t1\t{cash:.2f}\t${cash:.2f}\t\t\t")
+        if symbol == 'DOGE':
+            print(f"{symbol}\t{quote:.5f}\t{quantity:.0f}\t${quote*quantity:.2f}\t{sign}{pnl_percent:.2f}%\t${cost_basis:.2f}\t{rsi:.2f}\t{self.rsi_buy_at[symbol]:.2f}\t{self.rsi_sell_at[symbol]:.2f}")
+        else:
+            print(f"{symbol}\t{quote:.2f}\t{quantity:.4f}\t${quote*quantity:.2f}\t{sign}{pnl_percent:.2f}%\t${cost_basis:.2f}\t{rsi:.2f}\t{self.rsi_buy_at[symbol]:.2f}\t{self.rsi_sell_at[symbol]:.2f}")
         
-        # Check for stop loss / take profits:
+        ## Adjust RSI buy/sell levels towards the defaults.
+        self.adjust_rsi(symbol)
+        ## Check for stop loss / take profits:
         if TAKE_PROFIT_PERCENT is not None and pnl_percent > TAKE_PROFIT_PERCENT:
-            info = rh.order_sell_crypto_limit(symbol, quantity, round(0.999*quote,2))
-            print(f"Take profit triggered!  Selling {symbol}")
-            # pprint(info)
+            # info = rh.order_sell_crypto_limit(symbol, quantity, round(0.999*quote,2))
+            info = self.trigger_tx(symbol, quantity, round(0.99*quote, 2), side="sell", quantity_on_hand = quantity)
+            if info is not None: 
+                print(f"Take profit triggered!  Selling {quantity} of {symbol}")
+                self.total_trades += 1
+            # if DEBUG_INFO: pprint(info)
             return # skip checking rsi this time around
-            
+        
         elif STOP_LOSS_PERCENT is not None and pnl_percent < -1*STOP_LOSS_PERCENT:
-            info = rh.order_sell_crypto_limit(symbol, quantity, round(0.995*quote, 2))
+            info = self.trigger_tx(symbol, quantity, round(0.99*quote, 2), side="sell", quantity_on_hand = quantity)
+            # info = rh.order_sell_crypto_limit(symbol, quantity, round(0.99*quote, 2))
             # rh.order_sell_crypto_by_quantity(symbol, round(quantity,6))
-            print(f"Stop loss triggered! Selling {symbol}")
-            # Step RSI buy cutoff down so we don't buy again right away
-            self.rsi_buy_at = max(0, self.rsi_buy_at - RSI_STEP_WHEN_TRIGGERED)
+            if info is not None:
+                print(f"Stop loss triggered! Selling {quantity} of {symbol}")
+                self.total_trades += 1
+                # Step RSI buy cutoff down so we don't buy again right away
+                self.bump_rsi(symbol, 'buy', 5) # 5x normal adjustment
             # pprint(info)
             return # skip checking rsi
         
-        # Check for RSI
-        if rsi <= self.rsi_buy_at:
-            self.trigger_buy(symbol=symbol)
-        elif rsi >= self.rsi_sell_at:
-            self.trigger_sell(symbol=symbol)
-            
-    def trigger_buy(self, symbol, buy_amount = None):
-        print("Buy triggered!")
-        cash_on_hand = self.check_cash_on_hand()
-        if cash_on_hand < MIN_DOLLARS_PER_TRADE:
-            print(f"Not enough to cash buy {symbol}.")
-            return
-        
-        # info = rh.get_crypto_info(symbol)
-        # if DEBUG_INFO: print(info)
-        if buy_amount is None:
-            buy_amount = min(cash_on_hand, MAX_DOLLARS_PER_TRADE)
-        print(f"Buying ${buy_amount} worth of {symbol}")
-        info = rh.order_buy_crypto_by_price("ETH", buy_amount)
-        if DEBUG_INFO: print(info)
+        # Check RSI to see if we should buy or sell
+        if rsi <= self.rsi_buy_at[symbol]:
+            info = self.trigger_tx(symbol, quantity = None, price = round(1.01*quote,2), side = 'buy', cash_on_hand = cash)
+            if info is not None:
+                try:
+                    if not isinstance(info['quantity'], list):
+                        pprint(f"Buying: {symbol}") # {info['quantity']:.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
+                        self.bump_rsi(symbol, 'buy')
+                        self.total_trades += 1
+                except (ValueError, KeyError):
+                    pass #logging.warn(f"Failed buying: {info}")
+                    
+        elif rsi >= self.rsi_sell_at[symbol]:
+            info = self.trigger_tx(symbol, quantity = None, price = None, side = 'sell', quantity_on_hand = quantity)
+            if info is not None:
+                try:
+                    if not isinstance(info['quantity'], list):
+                        pprint(f"Selling: {symbol}") # {info['quantity']:0.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
+                        self.bump_rsi(symbol, 'sell')
+                        self.total_trades += 1                    
+                except (ValueError, KeyError):
+                    pass # logging.warn(f"Failed selling: {info}")
+                
+    def trigger_tx(self, symbol, quantity = None, price = None, side = None, cash_on_hand = None, quantity_on_hand = None):
+        """ Attempts to make a trade. Returns None if no trade was made. """
+        info = None
+        if side not in {"buy", "sell"}:
+            raise Exception("side should be 'buy' or 'sell'")
+        if side == 'buy':
+            cash_on_hand = self.check_cash_on_hand()
+            if cash_on_hand < MIN_DOLLARS_PER_TRADE: return
 
-        if 'non_field_errors' in info.keys():
-            # Probably insufficient money...
-            if DEBUG_INFO: print(f"Error(s): {info['non_field_errors']}")
-        elif 'quantity' in info.keys() and isinstance(info['quantity'], list):
-            # Probably order quantity is too small...
-            if DEBUG_INFO: print(f"Error(s): {info['quantity']}")
-        else:
-            # Probably worked
-            pass
-        # Decrease rsi buy level
-        self.rsi_buy_at = max(0, self.rsi_buy_at - RSI_STEP_WHEN_TRIGGERED)
-        return
-    def trigger_sell(self, symbol, sell_amount = None):
-        print("Sell triggered!")
-        
-        quantity = float( list(filter(lambda x: x['currency']['code'] == symbol, rh.get_crypto_positions()))[0]['quantity'] )
-        # print(f"Have {quantity} {symbol}")
-        quote = float(rh.get_crypto_quote(symbol)['bid_price'])
-        
-        if quote*quantity >= MAX_DOLLARS_PER_TRADE:
-            quantity = round(MAX_DOLLARS_PER_TRADE/quote, 6)
-        
-        print(f"Selling {quantity} of {symbol}")
-        if quote*quantity < MIN_DOLLARS_PER_TRADE:
-            print(f"Amount of {symbol} below minimum. Skipping.")
-            return
-        
-        info = rh.order_sell_crypto_by_quantity(symbol, quantity)
-        
-        if DEBUG_INFO: print(info)
-        
-        
-        # Increase rsi sell level
-        self.rsi_sell_at = min(100, self.rsi_sell_at + RSI_STEP_WHEN_TRIGGERED)
-        return 
+            if price is None:
+                raise Exception("Price cannot be None. Calcuate a price or change the code to calculate a default price.")
+            elif quantity is None: 
+                # price is not None and quantity is None
+                # so calculate a quantity:
+                if cash_on_hand is None:
+                    cash_on_hand = self.check_cash_on_hand(symbol="USD")
+                buy_amount = min(cash_on_hand, MAX_DOLLARS_PER_TRADE)
+                if cash_on_hand - buy_amount < MIN_DOLLARS_PER_TRADE:
+                    buy_amount = cash_on_hand
+                info = rh.order_buy_crypto_by_price(symbol, buy_amount)
+            else:
+                info = rh.order_buy_crypto_limit(symbol, quantity, price)
+            
+        else: # side == 'sell'
+            if price is None:
+                price = float(rh.get_crypto_quote(symbol)['bid_price'])
+            if quantity_on_hand is None:
+                raise Exception("quantity_on_hand cannot be None. Calcuate a quantity or change the code to calculate a default price.")
+            if quantity_on_hand*price < MIN_DOLLARS_PER_TRADE:
+                return
+            if quantity is None:
+                
+                quantity = round(MAX_DOLLARS_PER_TRADE/price, self.increments[symbol])
+                if price*quantity_on_hand < MAX_DOLLARS_PER_TRADE or price*(quantity_on_hand - quantity) < MIN_DOLLARS_PER_TRADE:
+                    quantity = quantity_on_hand
+            else:
+                pass
+            info = rh.order_sell_crypto_by_quantity(symbol, quantity)
+            
+        if info is not None:
+            with Capturing() as output:
+                print(f"Trade executed: symbol = {symbol}, quantity = {quantity}, price = {price}, side = {side}\n")
+                print(info)
+            try:
+                self.order_ids[time.time()] = info['id']                
+                self.bump_rsi(symbol,side)
+            except KeyError:
+                # Trade didn't complete, don't change rsi cutoffs
+                pass
+            logging.info(output)
+        return info
+    def adjust_rsi(self, symbol):
+        # increase the buy level, but no more than the default
+        self.rsi_buy_at[symbol] = min(DEFAULT_RSI_BUY_AT, self.rsi_buy_at[symbol] + (time.time() - self.last_time[symbol])*RSI_RESET_BUY_SPEED)
+        # decrease the sell level, but no less than the default
+        self.rsi_sell_at[symbol] = max(DEFAULT_RSI_SELL_AT, self.rsi_sell_at[symbol] - (time.time() - self.last_time[symbol])*RSI_RESET_SELL_SPEED)
+        # Store the last time the rsi was adjusted
+        self.last_time[symbol] = time.time()
+    def bump_rsi(self, symbol, side, multiple=1):
+        """ """
+        assert side in {'buy','sell'}
+        if side == 'buy':
+            self.rsi_buy_at[symbol] = max(0, self.rsi_buy_at[symbol] - multiple*RSI_STEP_BUY_WHEN_TRIGGERED)
+        elif side == 'sell':
+            self.rsi_sell_at[symbol] = min(100, self.rsi_sell_at[symbol] + multiple*RSI_STEP_SELL_WHEN_TRIGGERED)
+
     
 def main():
     
     client = RobinTrader(username = USERNAME, password = PASSWORD)
     client.mainloop(sleep_time = MAIN_LOOP_SLEEP_TIME)
     
-    rh.logout()
-
 if __name__ == "__main__":
     main()
