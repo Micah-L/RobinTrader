@@ -20,13 +20,13 @@ TWO_FACTOR_IS_SMS = True
 # To only trade one symbol:
 # SYMBOLS = ['ETH']
 # To trade multiple symbols:
-SYMBOLS = ['ETH', 'ETC', 'LTC']
-# SYMBOLS = ['ETH', 'ETC', 'LTC', 'DOGE']
+# SYMBOLS = ['ETH', 'ETC', 'LTC']
+SYMBOLS = ['BTC', 'ETH', 'ETC', 'LTC', 'DOGE']
  
 # program will cancel all crypto orders older than this many seconds
 DEFAULT_STALE_ORDER_AGE = 90
  
-TAKE_PROFIT_PERCENT = 1.5
+TAKE_PROFIT_PERCENT = 2.5
 # TAKE_PROFIT_PERCENT = None
 STOP_LOSS_PERCENT = 1
 # STOP_LOSS_PERCENT = None
@@ -57,7 +57,7 @@ RSI_RESET_SELL_SPEED = 0.05
 
 # per individual trade
 MIN_DOLLARS_PER_TRADE = 2.00
-MAX_DOLLARS_PER_TRADE = 3.50
+MAX_DOLLARS_PER_TRADE = 5.50
 
 ## Misc settings ##
 
@@ -304,10 +304,12 @@ class RobinTrader:
         sign = "+" if pnl_percent >= 0 else ""
         print("Sym\tQuote\tQty\tVal\tPnL\tCost\tRSI\tBuy@\tSell@")
         print(f"USD\t1\t{cash:.2f}\t${cash:.2f}\t\t\t")
-        if symbol == 'DOGE':
+        if symbol == 'BTC':
+            print(f"{symbol}\t{quote:.0f}\t{quantity:.5f}\t${quote*quantity:.2f}\t{sign}{pnl_percent:.2f}%\t${cost_basis:.2f}\t{rsi:.2f}\t{self.rsi_buy_at[symbol]:.2f}\t{self.rsi_sell_at[symbol]:.2f}")
+        elif symbol == 'DOGE':
             print(f"{symbol}\t{quote:.5f}\t{quantity:.0f}\t${quote*quantity:.2f}\t{sign}{pnl_percent:.2f}%\t${cost_basis:.2f}\t{rsi:.2f}\t{self.rsi_buy_at[symbol]:.2f}\t{self.rsi_sell_at[symbol]:.2f}")
         else:
-            print(f"{symbol}\t{quote:.2f}\t{quantity:.4f}\t${quote*quantity:.2f}\t{sign}{pnl_percent:.2f}%\t${cost_basis:.2f}\t{rsi:.2f}\t{self.rsi_buy_at[symbol]:.2f}\t{self.rsi_sell_at[symbol]:.2f}")
+            print(f"{symbol}\t{quote:.2f}\t{quantity:.5f}\t${quote*quantity:.2f}\t{sign}{pnl_percent:.2f}%\t${cost_basis:.2f}\t{rsi:.2f}\t{self.rsi_buy_at[symbol]:.2f}\t{self.rsi_sell_at[symbol]:.2f}")
         
         ## Adjust RSI buy/sell levels towards the defaults.
         self.adjust_rsi(symbol)
@@ -339,7 +341,7 @@ class RobinTrader:
             if info is not None:
                 try:
                     if not isinstance(info['quantity'], list):
-                        pprint(f"Buying: {symbol}") # {info['quantity']:.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
+                        print(f"Buying: {symbol}") # {info['quantity']:.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
                         self.bump_rsi(symbol, 'buy')
                         self.total_trades += 1
                 except (ValueError, KeyError):
@@ -350,7 +352,7 @@ class RobinTrader:
             if info is not None:
                 try:
                     if not isinstance(info['quantity'], list):
-                        pprint(f"Selling: {symbol}") # {info['quantity']:0.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
+                        print(f"Selling: {symbol}") # {info['quantity']:0.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
                         self.bump_rsi(symbol, 'sell')
                         self.total_trades += 1                    
                 except (ValueError, KeyError):
