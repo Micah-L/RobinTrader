@@ -32,14 +32,16 @@ STOP_LOSS_PERCENT = 1
 # STOP_LOSS_PERCENT = None
 
 # Period for RSI calculation (number of data frames)
-RSI_PERIOD = 7
+RSI_PERIOD = 21
 # Size of data frame for calculating RSI
 # Can be '15second', '5minute', '10minute', 'hour', 'day', or 'week'
-# '15second' may result in an error
-RSI_WINDOW = '5minute'
+# '15second' may result in an error if RSI_SPAN is longer than 'hour'
+# RSI_WINDOW = '5minute'
+RSI_WINDOW = '15second'
 # The entire time frame to collect data points. Can be 'hour', 'day', 'week', 'month', '3month', 'year', or '5year'
 # If the span is too small to fit RSI_PERIOD number of RSI_WINDOWs then there will be an error
-RSI_SPAN = "day"
+# RSI_SPAN = "day"
+RSI_SPAN = 'hour'
 
 # Set RSI levels to buy/sell at
 DEFAULT_RSI_BUY_AT = 30
@@ -403,7 +405,7 @@ class RobinTrader:
                 print(info)
             try:
                 self.order_ids[time.time()] = info['id']                
-                self.bump_rsi(symbol,side)
+                # self.bump_rsi(symbol,side)
             except KeyError:
                 # Trade didn't complete, don't change rsi cutoffs
                 pass
