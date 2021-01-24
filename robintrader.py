@@ -26,13 +26,13 @@ SYMBOLS = ['BTC', 'ETH', 'ETC', 'LTC', 'DOGE']
 # program will cancel all crypto orders older than this many seconds
 DEFAULT_STALE_ORDER_AGE = 90
  
-TAKE_PROFIT_PERCENT = 2.5
+TAKE_PROFIT_PERCENT = 3
 # TAKE_PROFIT_PERCENT = None
 STOP_LOSS_PERCENT = 1
 # STOP_LOSS_PERCENT = None
 
 # Period for RSI calculation (number of data frames)
-RSI_PERIOD = 21
+RSI_PERIOD = 17
 # Size of data frame for calculating RSI
 # Can be '15second', '5minute', '10minute', 'hour', 'day', or 'week'
 # '15second' may result in an error if RSI_SPAN is longer than 'hour'
@@ -151,7 +151,7 @@ def RSI(prices, current_only=False, period = RSI_PERIOD):
     # Returns a list of RSI values
     return rsi
 def float_to_ndigits(f):
-    """ f must be a multiple of 10 """
+    """ f must be a power of 10 """
     ndigits = 0
     while f < 1:
         ndigits += 1
@@ -169,6 +169,11 @@ class RobinTrader:
         self.up_since = time.time()
         
         self.increments = defaultdict(int) # {symbol : increment (int)}
+        self.increments['ETC'] = 6
+        self.increments['ETH'] = 6
+        self.increments['BTC'] = 8
+        self.increments['DOGE'] = 0
+        self.increments['LTC'] = 8
         
         self.order_ids = dict() # {time : id} pairs
         
@@ -201,6 +206,7 @@ class RobinTrader:
             crypto_positions = rh.get_crypto_positions()
             if symbol not in self.increments.keys():
                 self.increments[symbol] = float_to_ndigits(float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['currency']['increment'] ))
+                self.increments[symbol] = min(8,self.increments[symbol])
             try:
                 crypto_on_hand['cost'] = float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['cost_bases'][0]['direct_cost_basis'] )
             except IndexError:
@@ -371,7 +377,11 @@ class RobinTrader:
 
             if price is None:
                 raise Exception("Price cannot be None. Calcuate a price or change the code to calculate a default price.")
-            elif quantity is None: 
+            if symbol == 'DOGE':
+                price = round(price, 8)
+            else:
+                price = round(price, 2)
+            if quantity is None: 
                 # price is not None and quantity is None
                 # so calculate a quantity:
                 if cash_on_hand is None:
@@ -386,6 +396,10 @@ class RobinTrader:
         else: # side == 'sell'
             if price is None:
                 price = float(rh.get_crypto_quote(symbol)['bid_price'])
+            if symbol == 'DOGE':
+                price = round(price, 8)
+            else:
+                price = round(price, 2)
             if quantity_on_hand is None:
                 raise Exception("quantity_on_hand cannot be None. Calcuate a quantity or change the code to calculate a default price.")
             if quantity_on_hand*price < MIN_DOLLARS_PER_TRADE:
