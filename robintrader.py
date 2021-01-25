@@ -49,12 +49,12 @@ DEFAULT_RSI_SELL_AT = 70
 
 # If this is non-zero, the rsi buy or sell levels will be adjusted down or up after each buy or sell.
 # Set higher to take advantage of longer price movements in one direction
-RSI_STEP_BUY_WHEN_TRIGGERED = 8
-RSI_STEP_SELL_WHEN_TRIGGERED = 16
+RSI_STEP_BUY_WHEN_TRIGGERED = 2
+RSI_STEP_SELL_WHEN_TRIGGERED = 2
 # The rate (in RSI/second) to adjust the RSI cutoffs back towards the default levels.
 # Set lower to take advantage of longer price movements in one direction
-RSI_RESET_BUY_SPEED = 0.02
-RSI_RESET_SELL_SPEED = 0.05
+RSI_RESET_BUY_SPEED = 0.01
+RSI_RESET_SELL_SPEED = 0.01
 
 
 # per individual trade
@@ -345,7 +345,7 @@ class RobinTrader:
         
         # Check RSI to see if we should buy or sell
         if rsi <= self.rsi_buy_at[symbol]:
-            info = self.trigger_tx(symbol, quantity = None, price = round(1.01*quote,2), side = 'buy', cash_on_hand = cash)
+            info = self.trigger_tx(symbol, quantity = None, price = 1.01*quote, side = 'buy', cash_on_hand = cash)
             if info is not None:
                 try:
                     if not isinstance(info['quantity'], list):
@@ -378,9 +378,10 @@ class RobinTrader:
             if price is None:
                 raise Exception("Price cannot be None. Calcuate a price or change the code to calculate a default price.")
             if symbol == 'DOGE':
-                price = round(price, 8)
+                price = round(price, 6)
             else:
                 price = round(price, 2)
+            
             if quantity is None: 
                 # price is not None and quantity is None
                 # so calculate a quantity:
@@ -389,7 +390,15 @@ class RobinTrader:
                 buy_amount = min(cash_on_hand, MAX_DOLLARS_PER_TRADE)
                 if cash_on_hand - buy_amount < MIN_DOLLARS_PER_TRADE:
                     buy_amount = cash_on_hand
-                info = rh.order_buy_crypto_by_price(symbol, buy_amount)
+                
+                quantity = round(buy_amount/price , self.increments[symbol])
+                info = rh.order_buy_crypto_limit(symbol, quantity, price)
+                #if symbol == 'DOGE':
+                #   info = rh.order_buy_crypto_by_price(symbol, round(buy_amount, self.increments[symbol]))
+                #   quantity = round(buy_amount/price , self.increments[symbol])
+                #   info = rh.order_buy_crypto_limit(symbol, quantity, price)
+                #else:
+                #    #info = rh.order_buy_crypto_by_price(symbol, buy_amount)
             else:
                 info = rh.order_buy_crypto_limit(symbol, quantity, price)
             
@@ -405,7 +414,6 @@ class RobinTrader:
             if quantity_on_hand*price < MIN_DOLLARS_PER_TRADE:
                 return
             if quantity is None:
-                
                 quantity = round(MAX_DOLLARS_PER_TRADE/price, self.increments[symbol])
                 if price*quantity_on_hand < MAX_DOLLARS_PER_TRADE or price*(quantity_on_hand - quantity) < MIN_DOLLARS_PER_TRADE:
                     quantity = quantity_on_hand
