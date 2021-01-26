@@ -10,7 +10,6 @@
 # Replace with your Robinhood login info
 USERNAME = "YourUsernameHere"
 PASSWORD = "YourPasswordHere" 
-
 # Set True to do 2fa by SMS, or False to do 2fa by email.
 TWO_FACTOR_IS_SMS = True
 
@@ -21,36 +20,38 @@ TWO_FACTOR_IS_SMS = True
 # SYMBOLS = ['ETH']
 # To trade multiple symbols:
 # SYMBOLS = ['ETH', 'ETC', 'LTC']
-SYMBOLS = ['BTC', 'ETH', 'ETC', 'LTC', 'DOGE']
+SYMBOLS = ['BTC', 'ETH']
+# SYMBOLS = ['BTC', 'ETH', 'ETC', 'LTC', 'DOGE']
+#SYMBOLS = ['DOGE']
  
 # program will cancel all crypto orders older than this many seconds
 DEFAULT_STALE_ORDER_AGE = 90
  
-TAKE_PROFIT_PERCENT = 3
+TAKE_PROFIT_PERCENT = 10
 # TAKE_PROFIT_PERCENT = None
-STOP_LOSS_PERCENT = 1
+STOP_LOSS_PERCENT = 5
 # STOP_LOSS_PERCENT = None
 
 # Period for RSI calculation (number of data frames)
-RSI_PERIOD = 17
+RSI_PERIOD = 9
 # Size of data frame for calculating RSI
 # Can be '15second', '5minute', '10minute', 'hour', 'day', or 'week'
 # '15second' may result in an error if RSI_SPAN is longer than 'hour'
-# RSI_WINDOW = '5minute'
-RSI_WINDOW = '15second'
+RSI_WINDOW = 'hour'
+# RSI_WINDOW = '15second'
 # The entire time frame to collect data points. Can be 'hour', 'day', 'week', 'month', '3month', 'year', or '5year'
 # If the span is too small to fit RSI_PERIOD number of RSI_WINDOWs then there will be an error
-# RSI_SPAN = "day"
-RSI_SPAN = 'hour'
+RSI_SPAN = "day"
+# RSI_SPAN = 'hour'
 
 # Set RSI levels to buy/sell at
 DEFAULT_RSI_BUY_AT = 30
-DEFAULT_RSI_SELL_AT = 70
+DEFAULT_RSI_SELL_AT = 80
 
 # If this is non-zero, the rsi buy or sell levels will be adjusted down or up after each buy or sell.
 # Set higher to take advantage of longer price movements in one direction
 RSI_STEP_BUY_WHEN_TRIGGERED = 2
-RSI_STEP_SELL_WHEN_TRIGGERED = 2
+RSI_STEP_SELL_WHEN_TRIGGERED = 10
 # The rate (in RSI/second) to adjust the RSI cutoffs back towards the default levels.
 # Set lower to take advantage of longer price movements in one direction
 RSI_RESET_BUY_SPEED = 0.01
@@ -59,7 +60,8 @@ RSI_RESET_SELL_SPEED = 0.01
 
 # per individual trade
 MIN_DOLLARS_PER_TRADE = 2.00
-MAX_DOLLARS_PER_TRADE = 5.50
+MAX_DOLLARS_PER_BUY = 5.50
+MAX_DOLLARS_PER_SELL = float('Inf')
 
 ## Misc settings ##
 
@@ -166,15 +168,17 @@ class RobinTrader:
         
         self.starting_total_value = None
         self.total_trades = 0
+        self.total_stops_losses = 0
+        self.total_take_profits = 0
         self.up_since = time.time()
         
-        self.increments = defaultdict(int) # {symbol : increment (int)}
-        self.increments['ETC'] = 6
-        self.increments['ETH'] = 6
-        self.increments['BTC'] = 8
-        self.increments['DOGE'] = 0
-        self.increments['LTC'] = 8
-        
+        self.ndigits = defaultdict(int) # {symbol : increment (int)}
+        self.ndigits['ETC'] = 6
+        self.ndigits['ETH'] = 6
+        self.ndigits['BTC'] = 8
+        self.ndigits['DOGE'] = 0
+        self.ndigits['LTC'] = 8
+
         self.order_ids = dict() # {time : id} pairs
         
         self.starting_rsi_buy_at = starting_rsi_buy_at
@@ -204,9 +208,9 @@ class RobinTrader:
         else:
             crypto_on_hand = dict()
             crypto_positions = rh.get_crypto_positions()
-            if symbol not in self.increments.keys():
-                self.increments[symbol] = float_to_ndigits(float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['currency']['increment'] ))
-                self.increments[symbol] = min(8,self.increments[symbol])
+            if symbol not in self.ndigits.keys():
+                self.ndigits[symbol] = float_to_ndigits(float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['currency']['increment'] ))
+                self.ndigits[symbol] = min(8,self.ndigits[symbol])
             try:
                 crypto_on_hand['cost'] = float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['cost_bases'][0]['direct_cost_basis'] )
             except IndexError:
@@ -250,7 +254,7 @@ class RobinTrader:
                         self.rsi_based_buy_sell(symbol = symbol)
                     outputs.append(output)
                 
-                print(f"{time.ctime()}\tUptime: {datetime.timedelta(seconds = int(time.time()-self.up_since))}\t\tTrades: {self.total_trades}")
+                print(f"{time.ctime()} | Uptime: {datetime.timedelta(seconds = int(time.time()-self.up_since))} | Trades: {self.total_trades} ({self.total_stops_losses} SL / {self.total_take_profits} TP)")
                 for o in outputs[0][0:2]:
                     print(o)
                 total_value = float(outputs[0][1].split('\t')[3][1:])
@@ -262,7 +266,7 @@ class RobinTrader:
                 diff = total_value - self.starting_total_value
                 sign = "+" if diff >= 0 else "-"
                 diff = abs(diff)
-                print(f"Total Value:\t${total_value:.2f}\t\tChange:\t{sign}${diff:.2f}")
+                print(f"Total Value:\t${total_value:.2f}\t\tChange:\t{sign}${diff:.2f}\tSL: {STOP_LOSS_PERCENT}%\tTP: {TAKE_PROFIT_PERCENT}%")
 
                 for out in outputs:
                     for o in out[3:]:
@@ -328,6 +332,7 @@ class RobinTrader:
             if info is not None: 
                 print(f"Take profit triggered!  Selling {quantity} of {symbol}")
                 self.total_trades += 1
+                self.total_take_profits += 1
             # if DEBUG_INFO: pprint(info)
             return # skip checking rsi this time around
         
@@ -338,6 +343,7 @@ class RobinTrader:
             if info is not None:
                 print(f"Stop loss triggered! Selling {quantity} of {symbol}")
                 self.total_trades += 1
+                self.total_stops_losses += 1
                 # Step RSI buy cutoff down so we don't buy again right away
                 self.bump_rsi(symbol, 'buy', 5) # 5x normal adjustment
             # pprint(info)
@@ -365,7 +371,6 @@ class RobinTrader:
                         self.total_trades += 1                    
                 except (ValueError, KeyError):
                     pass # logging.warn(f"Failed selling: {info}")
-                
     def trigger_tx(self, symbol, quantity = None, price = None, side = None, cash_on_hand = None, quantity_on_hand = None):
         """ Attempts to make a trade. Returns None if no trade was made. """
         info = None
@@ -387,15 +392,15 @@ class RobinTrader:
                 # so calculate a quantity:
                 if cash_on_hand is None:
                     cash_on_hand = self.check_cash_on_hand(symbol="USD")
-                buy_amount = min(cash_on_hand, MAX_DOLLARS_PER_TRADE)
+                buy_amount = min(cash_on_hand, MAX_DOLLARS_PER_BUY)
                 if cash_on_hand - buy_amount < MIN_DOLLARS_PER_TRADE:
                     buy_amount = cash_on_hand
                 
-                quantity = round(buy_amount/price , self.increments[symbol])
+                quantity = round(buy_amount/price , self.ndigits[symbol])
                 info = rh.order_buy_crypto_limit(symbol, quantity, price)
                 #if symbol == 'DOGE':
-                #   info = rh.order_buy_crypto_by_price(symbol, round(buy_amount, self.increments[symbol]))
-                #   quantity = round(buy_amount/price , self.increments[symbol])
+                #   info = rh.order_buy_crypto_by_price(symbol, round(buy_amount, self.ndigits[symbol]))
+                #   quantity = round(buy_amount/price , self.ndigits[symbol])
                 #   info = rh.order_buy_crypto_limit(symbol, quantity, price)
                 #else:
                 #    #info = rh.order_buy_crypto_by_price(symbol, buy_amount)
@@ -414,8 +419,8 @@ class RobinTrader:
             if quantity_on_hand*price < MIN_DOLLARS_PER_TRADE:
                 return
             if quantity is None:
-                quantity = round(MAX_DOLLARS_PER_TRADE/price, self.increments[symbol])
-                if price*quantity_on_hand < MAX_DOLLARS_PER_TRADE or price*(quantity_on_hand - quantity) < MIN_DOLLARS_PER_TRADE:
+                quantity = round(MAX_DOLLARS_PER_SELL/price, self.ndigits[symbol])
+                if price*quantity_on_hand < MAX_DOLLARS_PER_SELL or price*(quantity_on_hand - quantity) < MIN_DOLLARS_PER_TRADE:
                     quantity = quantity_on_hand
             else:
                 pass
@@ -448,7 +453,6 @@ class RobinTrader:
         elif side == 'sell':
             self.rsi_sell_at[symbol] = min(100, self.rsi_sell_at[symbol] + multiple*RSI_STEP_SELL_WHEN_TRIGGERED)
 
-    
 def main():
     
     client = RobinTrader(username = USERNAME, password = PASSWORD)
