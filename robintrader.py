@@ -70,8 +70,8 @@ MAIN_LOOP_SLEEP_TIME = 6.15
 
 # If true, print extra information to console
 DEBUG_INFO = False
-
-# END CONSTANTS #
+DEBUG_MODE = False
+# END CONSTANTS 
 ###~#~#~#~#~#~###
 
 
@@ -159,7 +159,12 @@ def float_to_ndigits(f):
         ndigits += 1
         f *= 10
     return ndigits
-
+def rand(a,b):
+    """ Returns a sort of random float between a and b """
+    t = time.time()
+    c = t % 11111 + 11111
+    return  c*t % (b - a) + a
+    
 class RobinTrader:
     """ Class to handle trading instance """
     def __init__(self, username, password, starting_rsi_buy_at = DEFAULT_RSI_BUY_AT, starting_rsi_sell_at = DEFAULT_RSI_SELL_AT):
@@ -190,7 +195,9 @@ class RobinTrader:
         # stores the last time the rsi_based_buy_sell function was run with [symbol]
         self.last_time = dict()
         
-        rh.login(username=username, password=password, expiresIn=86400, by_sms=TWO_FACTOR_IS_SMS)
+        rh.login(username=username, password=password, expiresIn=31536000, by_sms=TWO_FACTOR_IS_SMS)
+        rh.logout()
+        rh.login(username=username, password=password, expiresIn=31536000, by_sms=TWO_FACTOR_IS_SMS)
         
         self.load_active_crypto_orders()
         
@@ -198,6 +205,7 @@ class RobinTrader:
         cash_on_hand = 0
         if symbol == "USD":
             info = rh.load_phoenix_account()
+            if DEBUG_MODE: print(info)
             cash_on_hand = float(info['uninvested_cash']['amount'])
             
             # TODO:
@@ -245,6 +253,7 @@ class RobinTrader:
         
         i = 0
         last_time=time.time()
+        allowed_errors = TimeoutError if DEBUG_MODE else (TypeError, KeyError, TimeoutError)
         while i < loops:
             # if DEBUG_INFO: print(f"Loop {i+1}")
             try:
@@ -276,15 +285,15 @@ class RobinTrader:
                        
                 self.cancel_old_crypto_orders()
             
-            except (TypeError, KeyError, TimeoutError):
+            except allowed_errors:
                 # Probably 504 server error, and robin_stocks tried subscript NoneType object 
                 # or KeyError
-                print(f"Server busy. Waiting {MAIN_LOOP_SLEEP_TIME}s to retry.")
-                time.sleep(MAIN_LOOP_SLEEP_TIME)
+                print(f"Server busy. Waiting {int(3*MAIN_LOOP_SLEEP_TIME)}s to retry.")
+                time.sleep(int(3*MAIN_LOOP_SLEEP_TIME))
             
 
             print("")
-            time.sleep(sleep_time)
+            time.sleep(sleep_time + rand(0,3))
             i += 1
     def rsi_based_buy_sell(self, symbol):
         """ Check the RSI and possibly place a buy or sell order """
@@ -454,7 +463,6 @@ class RobinTrader:
             self.rsi_sell_at[symbol] = min(100, self.rsi_sell_at[symbol] + multiple*RSI_STEP_SELL_WHEN_TRIGGERED)
 
 def main():
-    
     client = RobinTrader(username = USERNAME, password = PASSWORD)
     client.mainloop(sleep_time = MAIN_LOOP_SLEEP_TIME)
     
