@@ -40,21 +40,18 @@ SYMBOLS = ['BTC', 'ETH', 'LTC']
 # SYMBOLS = ['BTC', 'ETH', 'ETC', 'LTC', 'DOGE']
 # SYMBOLS = ['BTC']
 
-# If true, allocate a maximum % of portfolio to each symbol
-# if false, allocate a maximum dollar value of portfolio to each
 MAX_ALLOCATION_IS_PERCENT = True
 # The maximum allocation of funds towards any one particular symbol
-# values default to DEFAULT_MAX_ALLOCATION when values are undefined
 DEFAULT_MAX_ALLOCATION = 50
-# Set the maximum for each symbol independently. Numbers need not add to 100%
+# If MAX_ALLOCATION is a dict, we can set maximum allocations for each symbol individually
 MAX_ALLOCATION = defaultdict(lambda: DEFAULT_MAX_ALLOCATION)
-# MAX_ALLOCATION['BTC'] = 60
-# MAX_ALLOCATION['BTC'] = None # Equivalent to 100% / no limit
+# values default to DEFAULT_MAX_ALLOCATION when commented / undefined
 MAX_ALLOCATION['BTC'] = 61.8
-MAX_ALLOCATION['ETH'] = 61.8
+# MAX_ALLOCATION['BTC'] = None # Equivalent to 100% / no limit
+MAX_ALLOCATION['ETH'] = 40
 MAX_ALLOCATION['ETC'] = 30
-MAX_ALLOCATION['LTC'] = 15
-MAX_ALLOCATION['DOGE'] = 15
+MAX_ALLOCATION['LTC'] = 10
+MAX_ALLOCATION['DOGE'] = 10
 
 # Program will cancel all crypto orders older than this many seconds
 DEFAULT_STALE_ORDER_AGE = 90
@@ -77,10 +74,38 @@ STOP_LOSS_PERCENT['BTC'] = 5
 STOP_LOSS_PERCENT['ETH'] = 5
 STOP_LOSS_PERCENT['LTC'] = 1
 
+# If set to True, stops will tighten as price moves:
+# If the position is in profit, the stop loss trail amount will decrease
+# to match the difference in stop to quote price
+MONOTONE_STOPLOSS = True
+
+# per individual trade
+MIN_DOLLARS_PER_TRADE = 2.00 # no need to change 
+#DEFAULT_MAX_DOLLARS_PER_BUY = 5.50
+DEFAULT_MAX_DOLLARS_PER_BUY = float('Inf')
+DEFAULT_MAX_DOLLARS_PER_SELL = float('Inf')
+MAX_DOLLARS_PER_BUY = defaultdict(lambda: DEFAULT_MAX_DOLLARS_PER_BUY)
+MAX_DOLLARS_PER_SELL = defaultdict(lambda: DEFAULT_MAX_DOLLARS_PER_SELL)
+MAX_DOLLARS_PER_BUY['BTC'] = 55
+MAX_DOLLARS_PER_BUY['ETH'] = 55
+# MAX_DOLLARS_PER_BUY['LTC'] = float('Inf')
+# MAX_DOLLARS_PER_SELL['BTC'] = 50
+# MAX_DOLLARS_PER_SELL['ETH'] = 50 
+
+# Don't trigger a sell unless PNL % is at least this much: 
+# (Except stop loss)
+# Set to None to disable
+DEFAULT_REQUIRE_PNL_TO_SELL = 1 
+REQUIRE_PNL_TO_SELL = defaultdict(lambda: DEFAULT_REQUIRE_PNL_TO_SELL)
+REQUIRE_PNL_TO_SELL['BTC'] = 2
+REQUIRE_PNL_TO_SELL['ETH'] = 1
+REQUIRE_PNL_TO_SELL['LTC'] = 1
+
 # Period for RSI calculation (number of data frames)
 DEFAULT_RSI_PERIOD = 9
 RSI_PERIOD = defaultdict(lambda: DEFAULT_RSI_PERIOD)
-# RSI_PERIOD['BTC'] = 14
+RSI_PERIOD['BTC'] = 9
+RSI_PERIOD['ETH'] = 9
 RSI_PERIOD['LTC'] = 7
 
 # Size of data frame for calculating RSI
@@ -88,14 +113,16 @@ RSI_PERIOD['LTC'] = 7
 # '15second' may result in an error if RSI_SPAN is longer than 'hour'
 DEFAULT_RSI_WINDOW = 'hour'
 RSI_WINDOW = defaultdict(lambda: DEFAULT_RSI_WINDOW)
-# RSI_WINDOW['BTC'] = 'hour'
+RSI_WINDOW['BTC'] = 'hour'
+RSI_WINDOW['ETH'] = 'hour'
 RSI_WINDOW['LTC'] = '5minute'
 
 # The entire time frame to collect data points. Can be 'hour', 'day', 'week', 'month', '3month', 'year', or '5year'
 # If the span is too small to fit RSI_PERIOD number of RSI_WINDOWs then there will be an error
 DEFAULT_RSI_SPAN = 'day'
 RSI_SPAN = defaultdict(lambda: DEFAULT_RSI_SPAN)
-# RSI_SPAN['BTC'] = 'day'
+RSI_SPAN['BTC'] = 'day'
+RSI_SPAN['ETH'] = 'day'
 RSI_SPAN['LTC'] = 'hour'
 
 # Set RSI levels to buy/sell at
@@ -107,7 +134,7 @@ RSI_BUY_AT['BTC'] = 30
 RSI_SELL_AT['BTC'] = 80
 RSI_BUY_AT['ETH'] = 30
 RSI_SELL_AT['ETH'] = 80
-RSI_BUY_AT['LTC'] = 10
+RSI_BUY_AT['LTC'] = 30
 RSI_SELL_AT['LTC'] = 70
 
 # If step is non-zero, the rsi buy or sell levels will be adjusted down or up after each buy or sell.
@@ -116,11 +143,11 @@ DEFAULT_RSI_STEP_BUY_WHEN_TRIGGERED = 1
 DEFAULT_RSI_STEP_SELL_WHEN_TRIGGERED = 10
 RSI_STEP_BUY_WHEN_TRIGGERED = defaultdict(lambda: DEFAULT_RSI_STEP_BUY_WHEN_TRIGGERED)
 RSI_STEP_SELL_WHEN_TRIGGERED = defaultdict(lambda: DEFAULT_RSI_STEP_SELL_WHEN_TRIGGERED)
-RSI_STEP_BUY_WHEN_TRIGGERED['BTC'] = 0.5
-RSI_STEP_SELL_WHEN_TRIGGERED['BTC'] = 10
-RSI_STEP_BUY_WHEN_TRIGGERED['ETH'] = 1
-RSI_STEP_SELL_WHEN_TRIGGERED['ETH'] = 10
-RSI_STEP_BUY_WHEN_TRIGGERED['LTC'] = 1
+RSI_STEP_BUY_WHEN_TRIGGERED['BTC'] = 20
+RSI_STEP_SELL_WHEN_TRIGGERED['BTC'] = 15
+RSI_STEP_BUY_WHEN_TRIGGERED['ETH'] = 20
+RSI_STEP_SELL_WHEN_TRIGGERED['ETH'] = 15
+RSI_STEP_BUY_WHEN_TRIGGERED['LTC'] = 35
 RSI_STEP_SELL_WHEN_TRIGGERED['LTC'] = 1
 
 # The rate (in RSI/second) to adjust the RSI cutoffs back towards the default levels.
@@ -135,28 +162,15 @@ RSI_RESET_BUY_SPEED['ETH'] = 0.01
 RSI_RESET_SELL_SPEED['ETH'] = 0.01
 
 
-
-# per individual trade
-MIN_DOLLARS_PER_TRADE = 2.00 # no need to change 
-DEFAULT_MAX_DOLLARS_PER_BUY = 5.50
-DEFAULT_MAX_DOLLARS_PER_SELL = float('Inf')
-MAX_DOLLARS_PER_BUY = defaultdict(lambda: DEFAULT_MAX_DOLLARS_PER_BUY)
-MAX_DOLLARS_PER_SELL = defaultdict(lambda: DEFAULT_MAX_DOLLARS_PER_SELL)
-MAX_DOLLARS_PER_BUY['BTC'] = 10
-MAX_DOLLARS_PER_BUY['ETH'] = 7.50
-MAX_DOLLARS_PER_BUY['LTC'] = float('Inf')
-# MAX_DOLLARS_PER_SELL['BTC'] = 50
-MAX_DOLLARS_PER_SELL['ETH'] = 50
-
 ## Misc settings ##
 
 # Time to wait between loops (seconds)
 MAIN_LOOP_SLEEP_TIME = 6.15
 
 # If true, print extra information to console
-DEBUG_INFO = False
+DEBUG = DEBUG_INFO = False
 
-# END SETTINGS #
+# END CONSTANTS #
 ###~#~#~#~#~#~###
 
 # You may place the above constants in a file called "config.py" to override the defaults.
@@ -164,7 +178,6 @@ try:
     from config import *
 except ModuleNotFoundError:
     pass
-
 
 # Useful functions
 def RSI(prices, period, current_only=False):
@@ -206,12 +219,8 @@ def RSI(prices, period, current_only=False):
     # Returns a list of RSI values
     return rsi
 def float_to_ndigits(f):
-    """ f must be a power of 10 """
-    ndigits = 0
-    while f < 1:
-        ndigits += 1
-        f *= 10
-    return ndigits
+     sys.stdout.write("\x1b7\x1b[%d;%df%s\x1b8" % (x, y, text))
+     sys.stdout.flush()
 class Capturing(list):
     """Capture stdout and save it as a variable. Usage:
     with Capturing() as output:
@@ -226,18 +235,16 @@ class Capturing(list):
         sys.stdout = self._stdout
 
 class smartdict(dict):
-    """ A dict d initialized with a dict D, whose default value for d[k] is D[k] """
+    """ A dict d initialized with a dict D or callable C,
+        whose default value for d[k] is D[k] or C(k), respectively. """
     def __init__(self, defaults):
         self.defaults = defaults
     def __missing__(self, key):
-        return self.defaults[key]
+        if callable(self.defaults):
+            return self.defaults(key)
+        else:
+            return self.defaults[key]
 
-
-# r = smartdict(RSI_BUY_AT)
-# print(r['BTC'])
-# r['BTC'] = r['BTC'] + 1
-# print(r['BTC'])
-# quit()
 class RobinTrader:
     """ Class to handle trading instance """
     def __init__(self, username, password):
@@ -260,18 +267,21 @@ class RobinTrader:
         self.quote = defaultdict(float) # Current price
         self.quantity_on_hand = defaultdict(float) 
         self.cost_basis = defaultdict(float)
+        self.buy_price = smartdict(lambda k: self.cost_basis[k]/self.quantity_on_hand[k])
         self.symbol_value = defaultdict(float) # Value in usd
         self.symbol_pnl_percent = defaultdict(float)
 
         self.symbol_trades = defaultdict(int) 
         self.symbol_take_profits = defaultdict(int) # How many take profits triggered
-        self.symbol_stop_losses = defaultdict(int) # How many stops triggered
+        self.stop_losses_triggered = defaultdict(int) # How many stops triggered
         self.rsi = defaultdict(float)
         self.time_rsi_cutoff_last_adjusted = defaultdict(lambda: self.up_since)
 
         self.take_profit_percent = TAKE_PROFIT_PERCENT
         self.stop_loss_percent = STOP_LOSS_PERCENT
-        
+        self.stop_loss_quote = smartdict(lambda k: self.quote[k]*(100-self.stop_loss_percent[k])/100)
+        self.stop_loss_delta = smartdict(lambda k: self.quote[k] - self.stop_loss_quote[k])
+
         # Can be a number or dict
         self.starting_rsi_buy_at = RSI_BUY_AT
         self.starting_rsi_sell_at = RSI_SELL_AT
@@ -293,8 +303,11 @@ class RobinTrader:
 
         # holds active orders placed
         self.order_ids = dict() # {time : id} pairs
-        
-        
+
+        ## Arguments
+        global DEBUG
+        if "--debug" in sys.argv:
+            DEBUG = True
         
         ## Actions performed on start up:
 
@@ -305,21 +318,30 @@ class RobinTrader:
         # Load orders that may have been placed before this program started
         self.load_active_crypto_orders()
         self.quantity_on_hand['USD'] = self.check_cash_on_hand()
+
+
+        # DEBUG
+        if DEBUG:
+            with open("account-data.log", 'w') as f:
+                for line in pformat(rh.load_phoenix_account(), indent=4):
+                    f.write(line)
         
     def check_cash_on_hand(self, symbol = "USD"):
         cash_on_hand = 0
         if symbol == "USD":
             info = rh.load_phoenix_account()
-            cash_on_hand = float(info['uninvested_cash']['amount'])
+
+            cash_on_hand = float(info['account_buying_power']['amount'])
             
             # TODO:
             # If we want to separate this bot from the rest of the acct, then we will need to 
             # do other calculations here based on orders placed and total amount willing to invest.
-            # If we're fine using the entire account balancefor this bot, then we only need 
-            # to return the uninvested_cash.
+            # If we're fine using the entire account balance for this bot, then we only need 
+            # to return the account_buying_power.
         else:
             crypto_on_hand = dict()
             crypto_positions = rh.get_crypto_positions()
+
             if symbol not in self.ndigits.keys():
                 self.ndigits[symbol] = float_to_ndigits(float( list(filter(lambda x: x['currency']['code'] == symbol, crypto_positions))[0]['currency']['increment'] ))
                 self.ndigits[symbol] = min(8,self.ndigits[symbol])
@@ -357,8 +379,8 @@ class RobinTrader:
         
         i = 0
         time_rsi_cutoff_last_adjusted=time.time()
+        errors = (TimeoutError, ConnectionError) if DEBUG else (TypeError, KeyError, TimeoutError, ConnectionError)
         while i < loops:
-            # if DEBUG_INFO: print(f"Loop {i+1}")
             try:
                 # Work around since output is already coming from self.rsi_based_buy_sell
                 # TODO: Make output less hackish by storing relevant data in instance variables and delgate output to specialized function
@@ -367,12 +389,15 @@ class RobinTrader:
                     with Capturing() as output:
                         self.rsi_based_buy_sell(symbol = symbol)
                     outputs.append(output)
-                
-                print(f"\
-{time.ctime()} \
-| Uptime: {datetime.timedelta(seconds = int(time.time()-self.up_since))} \
-| Total Trades: {self.total_trades} ({self.total_stops_losses} SL / {self.total_take_profits} TP)")
-                
+
+                heading = f"┃{time.ctime()} │ " + \
+                          f"Uptime: {datetime.timedelta(seconds = int(time.time()-self.up_since))}  │ " + \
+                          f"Total Trades: {self.total_trades} ({self.total_stops_losses} SL / {self.total_take_profits} TP)" 
+                print(f"┏{'━'*(12*8-5)}┓")
+                line_size = 8*12
+                print(f"{heading}{' '*(line_size-len(heading)-4)}┃")
+                print(f"┗{'━'*(12*8-5)}┛")
+                # for title and usd
                 for o in outputs[0][0:2]:
                     print(o)
                     
@@ -395,10 +420,10 @@ class RobinTrader:
                        
                 self.cancel_old_crypto_orders()
             
-            except (TypeError, KeyError, TimeoutError):
+            except errors: # (TypeError, KeyError, TimeoutError):
                 # Probably 504 server error, and robin_stocks tried subscript NoneType object 
                 # or KeyError
-                print(f"Server busy. Waiting {MAIN_LOOP_SLEEP_TIME}s to retry.")
+                print(f"Server busy. Waiting {int(2*MAIN_LOOP_SLEEP_TIME)}s to retry.")
                 time.sleep(MAIN_LOOP_SLEEP_TIME)
             
 
@@ -407,13 +432,6 @@ class RobinTrader:
             i += 1
     def rsi_based_buy_sell(self, symbol):
         """ Check the RSI and possibly place a buy or sell order """
-        
-        # if symbol not in self.rsi_buy_at.keys():
-        #     self.rsi_buy_at[symbol] = self.starting_rsi_buy_at
-        # if symbol not in self.rsi_sell_at.keys():
-        #     self.rsi_sell_at[symbol] = self.starting_rsi_sell_at
-        if symbol not in self.time_rsi_cutoff_last_adjusted.keys():
-            self.time_rsi_cutoff_last_adjusted[symbol] = time.time()
         
         ## Check the RSI ##
         historical_data = rh.get_crypto_historicals(symbol=symbol, interval=RSI_WINDOW[symbol], span=RSI_SPAN[symbol], bounds="24_7", info=None)
@@ -426,10 +444,18 @@ class RobinTrader:
         
         self.quantity_on_hand['USD'] = self.cash_on_hand = cash = self.check_cash_on_hand()
         crypto_on_hand = self.check_cash_on_hand(symbol = symbol)
+
         self.quote[symbol] = quote = crypto_on_hand['quote']
         self.quantity_on_hand[symbol] = quantity = crypto_on_hand['quantity']
         self.cost_basis[symbol] = cost_basis = crypto_on_hand['cost']
         self.symbol_value[symbol] = quote*quantity
+
+        ## If quantity is 0, reset trailing stops
+        if self.quantity_on_hand[symbol] == 0: 
+            if symbol in self.stop_loss_quote.keys(): 
+                del self.stop_loss_quote[symbol]
+                del self.stop_loss_delta[symbol]
+
         try:
             self.symbol_pnl_percent[symbol] = 100*(quote*quantity - cost_basis)/cost_basis
         except ZeroDivisionError:
@@ -437,7 +463,7 @@ class RobinTrader:
         
         # TODO: Store data in instance variables and move output to mainloop or special output function:
         sign = "+" if self.symbol_pnl_percent[symbol] >= 0 else ""
-        print("Sym\tQuote\tQty\tVal\tPnL\tCost\tRSI\tBuy@\tSell@\tTrades\tTP\tSL")
+        print("Sym\tQuote\tQty\tVal\tPnL\tCost\tStop\tRSI\tBuy@\tSell@\tT|P|L\tTP|SL")
         print(f"USD\t1\t{self.quantity_on_hand['USD']:.2f}\t${self.quantity_on_hand['USD']:.2f}\t\t\t")
         if symbol == 'BTC':
             quote_prec = 0
@@ -454,16 +480,23 @@ class RobinTrader:
         print(f"${self.symbol_value[symbol]:.2f}", end='\t')
         print(f"{sign}{self.symbol_pnl_percent[symbol]:.2f}%", end='\t')
         print(f"${self.cost_basis[symbol]:.2f}", end='\t')
+        print(f"{self.stop_loss_quote[symbol]:.{quote_prec}f}", end='\t')
         print(f"{self.rsi[symbol]:.2f}", end='\t')
         print(f"{self.rsi_buy_at[symbol]:.2f}", end='\t')
         print(f"{self.rsi_sell_at[symbol]:.2f}", end='\t')
-        print(f"{self.symbol_trades[symbol]}",end='\t')
-        print(f"{self.symbol_take_profits[symbol]}|{self.take_profit_percent[symbol]}%", end='\t')
-        print(f"{self.symbol_stop_losses[symbol]}|{self.stop_loss_percent[symbol]}%", end='\t')
-        
-        
+        print(f"{self.symbol_trades[symbol]}|{self.symbol_take_profits[symbol]}|{self.stop_losses_triggered[symbol]}",end='\t')
+        print(f"{self.take_profit_percent[symbol]}%|{self.stop_loss_percent[symbol]}%", end='\t')
+        print()
+
+        ## Adjust stop if price is high, but only if quantity is > 0
+        if self.quantity_on_hand[symbol] > 0 and self.quote[symbol] > self.stop_loss_quote[symbol] + self.stop_loss_delta[symbol]:
+            self.stop_loss_quote[symbol] = self.quote[symbol] - self.stop_loss_delta[symbol]
+        elif MONOTONE_STOPLOSS:
+            if self.symbol_pnl_percent[symbol] > 0:
+                self.stop_loss_delta[symbol] = max(0,self.quote[symbol] - self.stop_loss_quote[symbol])
+                
         ## Adjust RSI buy/sell levels towards the defaults.
-        self.adjust_rsi(symbol)
+        self.adjust_rsi(symbol)        
         
         ## Check for stop loss / take profits:
         if self.take_profit_percent[symbol] is not None and self.symbol_pnl_percent[symbol] > self.take_profit_percent[symbol]:
@@ -484,7 +517,7 @@ class RobinTrader:
                 print(f"Stop loss triggered! Selling {quantity} of {symbol}")
                 self.total_trades += 1
                 self.total_stops_losses += 1
-                self.symbol_stop_losses[symbol] += 1
+                self.stop_losses_triggered[symbol] += 1
                 # Step RSI buy cutoff down so we don't buy again right away
                 self.bump_rsi(symbol, 'buy', 5) # 5x normal adjustment
             # pprint(info)
@@ -503,17 +536,21 @@ class RobinTrader:
                 except (ValueError, KeyError):
                     logging.warning(f"Failed buying: {info}")
                     
-        elif rsi >= self.rsi_sell_at[symbol]:
-            info = self.trigger_tx(symbol, quantity = None, price = None, side = 'sell', quantity_on_hand = quantity)
-            if info is not None:
-                try:
-                    if not isinstance(info['quantity'], list):
-                        print(f"Selling: {symbol}") # {info['quantity']:0.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
-                        self.bump_rsi(symbol, 'sell')
-                        self.total_trades += 1     
-                        self.symbol_trades[symbol] += 1
-                except (ValueError, KeyError):
-                    logging.warning(f"Failed selling: {info}")
+        elif self.quantity_on_hand[symbol] > 0 and rsi >= self.rsi_sell_at[symbol]:
+            if REQUIRE_PNL_TO_SELL[symbol] is not None and\
+                self.symbol_pnl_percent[symbol] < REQUIRE_PNL_TO_SELL[symbol]:
+                print(f"RSI sell level met for {symbol}, but PnL not high enough")
+            else:
+                info = self.trigger_tx(symbol, quantity = None, price = None, side = 'sell', quantity_on_hand = quantity)
+                if info is not None:
+                    try:
+                        if not isinstance(info['quantity'], list):
+                            print(f"Selling: {symbol}") # {info['quantity']:0.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
+                            self.bump_rsi(symbol, 'sell')
+                            self.total_trades += 1     
+                            self.symbol_trades[symbol] += 1
+                    except (ValueError, KeyError):
+                        logging.warning(f"Failed selling: {info}")
     def trigger_tx(self, symbol, quantity = None, price = None, side = None, cash_on_hand = None, quantity_on_hand = None):
         """ Attempts to make a trade. Returns None if no trade was made. """
         info = None
