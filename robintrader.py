@@ -29,6 +29,7 @@ PASSWORD = "password"
 # Set True to do 2fa by SMS, or False to do 2fa by email.
 TWO_FACTOR_IS_SMS = True
 
+
 ## Strategy related ##
 
 # Create a list of symbols to trade
@@ -169,10 +170,9 @@ MAIN_LOOP_SLEEP_TIME = 6.15
 
 # If true, print extra information to console
 DEBUG = DEBUG_INFO = False
-
+EXTRA_INFO = False
 # END CONSTANTS #
 ###~#~#~#~#~#~###
-
 # You may place the above constants in a file called "config.py" to override the defaults.
 try:
     from config import *
@@ -486,17 +486,29 @@ class RobinTrader:
         print(f"{self.rsi_sell_at[symbol]:.2f}", end='\t')
         print(f"{self.symbol_trades[symbol]}|{self.symbol_take_profits[symbol]}|{self.stop_losses_triggered[symbol]}",end='\t')
         print(f"{self.take_profit_percent[symbol]}%|{self.stop_loss_percent[symbol]}%", end='\t')
-        print()
-
+        
+        alpha = -1
+        new_delta = -1
         ## Adjust stop if price is high, but only if quantity is > 0
         if self.quantity_on_hand[symbol] > 0 and self.quote[symbol] > self.stop_loss_quote[symbol] + self.stop_loss_delta[symbol]:
             self.stop_loss_quote[symbol] = self.quote[symbol] - self.stop_loss_delta[symbol]
         elif MONOTONE_STOPLOSS:
             if self.symbol_pnl_percent[symbol] > 0:
-                self.stop_loss_delta[symbol] = max(0,self.quote[symbol] - self.stop_loss_quote[symbol])
+                new_delta = max(0,self.quote[symbol] - self.stop_loss_quote[symbol])
+                # 0 pnl = 0 alpha
+                # 1 pnl = 1 alpha
+                # TP pnl = 100 alpha
+                tp = self.take_profit_percent[symbol] if self.take_profit_percent[symbol] is not None else 100
+                alpha = min(1, self.symbol_pnl_percent[symbol]/tp)
+                # alpha = (1 - min(1, max(tp - self.symbol_pnl_percent[symbol], 0)/tp) )
+                # Take a weighted average
+                self.stop_loss_delta[symbol] = (1-alpha)*self.stop_loss_delta[symbol] + (alpha)*new_delta
                 
         ## Adjust RSI buy/sell levels towards the defaults.
         self.adjust_rsi(symbol)        
+        if EXTRA_INFO:
+            print(f"{self.stop_loss_delta[symbol]:.2f}\t{alpha:.3f}\t{new_delta:.2f}")
+        
         
         ## Check for stop loss / take profits:
         if self.take_profit_percent[symbol] is not None and self.symbol_pnl_percent[symbol] > self.take_profit_percent[symbol]:
@@ -509,7 +521,8 @@ class RobinTrader:
                 self.symbol_take_profits[symbol] += 1
             return # skip checking rsi this time around
         
-        elif self.stop_loss_percent[symbol] is not None and self.symbol_pnl_percent[symbol] < -1*self.stop_loss_percent[symbol]:
+        elif self.stop_loss_percent[symbol] is not None and (self.symbol_pnl_percent[symbol] < -1*self.stop_loss_percent[symbol]\
+                                                        or self.quote[symbol] < self.stop_loss_quote[symbol]):
             info = self.trigger_tx(symbol, quantity, round(0.99*quote, 2), side="sell", quantity_on_hand = quantity)
             # info = rh.order_sell_crypto_limit(symbol, quantity, round(0.99*quote, 2))
             # rh.order_sell_crypto_by_quantity(symbol, round(quantity,6))
