@@ -10,11 +10,15 @@ import logging
 logging.basicConfig(filename='trades.log', encoding='utf-8', level=logging.INFO, format = '%(asctime)-15s%(message)s')
 from io import StringIO 
 import sys
-
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 # Imports for installed modules:
 import robin_stocks as rh
 import pandas as pd
+
+# Imports for custom modules:
+from display import ConsoleInterface, Display
 
 
 ###  SETTINGS  ###
@@ -170,14 +174,15 @@ MAIN_LOOP_SLEEP_TIME = 6.15
 
 # If true, print extra information to console
 DEBUG = DEBUG_INFO = False
-EXTRA_INFO = False
-# END CONSTANTS #
+
+# END SETTINGS #
 ###~#~#~#~#~#~###
 # You may place the above constants in a file called "config.py" to override the defaults.
 try:
     from config import *
 except ModuleNotFoundError:
-    pass
+    print("No config.py file found. Using default settings.")
+    print("You may create a file called config.py, and add some variable declarations for some or all of the variables found in the beginning of this file to override the defaults. Variables contained in this file are considered default.")
 
 # Useful functions
 def RSI(prices, period, current_only=False):
@@ -319,13 +324,49 @@ class RobinTrader:
         self.load_active_crypto_orders()
         self.quantity_on_hand['USD'] = self.check_cash_on_hand()
 
+        ## Set up the display
+        self.disp_heading = Display()
+        self.disp_grid_heading = Display("Sym\tQuote\tQty\tVal\tPnL\tCost\tStop\tRSI\tBuy@\tSell@\tT|P|L\tTP|SL")
+        self.disp_usd = Display(num_lines=1)
+        self.disp_crypto = Display(num_lines = len(SYMBOLS))
+        self.disp_totals = Display(num_lines=1)
+        self.disp_info_feed = Display(num_lines = 6)
 
-        # DEBUG
+        self.display = ConsoleInterface(self.disp_heading,
+                                        self.disp_grid_heading,
+                                        self.disp_usd,
+                                        self.disp_crypto,
+                                        self.disp_totals,
+                                        self.disp_info_feed)
+        
+        ## DEBUG
         if DEBUG:
             with open("account-data.log", 'w') as f:
                 for line in pformat(rh.load_phoenix_account(), indent=4):
                     f.write(line)
-        
+
+    def update_display(self):
+        horiz_line = '─'
+        vert_line = '│'
+        top_left_corner = '┌'
+        top_right_corner = '┐'
+        bot_left_corner = '└'
+        bot_right_corner = '┘'
+        # Heading
+        line_size = 8*12
+        lines = []
+        lines += [f"{top_left_corner}{horiz_line*(line_size-5)}{top_right_corner}"]
+        heading = f"{vert_line}{time.ctime()} │ " + \
+                  f"Uptime: {datetime.timedelta(seconds = int(time.time()-self.up_since))}  │ " + \
+                  f"Total Trades: {self.total_trades} ({self.total_take_profits} TP / {self.total_stops_losses} SL)" 
+        heading = heading + f"{' '*(line_size-len(heading)-4)}{vert_line}"
+        lines += [heading]
+        lines += [f"{bot_left_corner}{horiz_line*(line_size-5)}{bot_right_corner}"]
+        self.disp_heading.setlines(*lines)
+
+        print(self.display)
+
+
     def check_cash_on_hand(self, symbol = "USD"):
         cash_on_hand = 0
         if symbol == "USD":
@@ -378,58 +419,69 @@ class RobinTrader:
         """Main loop which calls other functions/strategies. Also handles the display."""
         
         i = 0
-        time_rsi_cutoff_last_adjusted=time.time()
         errors = (TimeoutError, ConnectionError) if DEBUG else (TypeError, KeyError, TimeoutError, ConnectionError)
         while i < loops:
             try:
                 # Work around since output is already coming from self.rsi_based_buy_sell
                 # TODO: Make output less hackish by storing relevant data in instance variables and delgate output to specialized function
-                outputs = []
+                # outputs = []
+                val = self.quantity_on_hand['USD'] 
                 for symbol in SYMBOLS:
-                    with Capturing() as output:
-                        self.rsi_based_buy_sell(symbol = symbol)
-                    outputs.append(output)
-
-                heading = f"┃{time.ctime()} │ " + \
-                          f"Uptime: {datetime.timedelta(seconds = int(time.time()-self.up_since))}  │ " + \
-                          f"Total Trades: {self.total_trades} ({self.total_stops_losses} SL / {self.total_take_profits} TP)" 
-                print(f"┏{'━'*(12*8-5)}┓")
-                line_size = 8*12
-                print(f"{heading}{' '*(line_size-len(heading)-4)}┃")
-                print(f"┗{'━'*(12*8-5)}┛")
-                # for title and usd
-                for o in outputs[0][0:2]:
-                    print(o)
-                    
-                
-                self.total_value = float(outputs[0][1].split('\t')[3][1:])
-                for out in outputs:
-                    print(out[2])
-                    self.total_value += float(out[2].split('\t')[3][1:])
+                #     with Capturing() as output:
+                    self.rsi_based_buy_sell(symbol = symbol)
+                    val += self.symbol_value[symbol]
+                self.total_value = val
                 if self.starting_total_value is None:
                     self.starting_total_value = self.total_value
                 diff = self.total_value - self.starting_total_value
                 sign = "+" if diff >= 0 else "-"
                 diff = abs(diff)
-                print(f"Total Value:\t${self.total_value:.2f}\t\tChange:\t{sign}${diff:.2f}")
-                for out in outputs:
-                    for o in out[3:]:
-                        print(o)
-                for _ in range(max(0,3-len(out[3:]))):
-                    print("")
+                self.disp_totals.feedlines(f"Total Value:\t${self.total_value:.2f}\t\tChange:\t{sign}${diff:.2f}")
+                self.update_display()
+
+                #     outputs.append(output)
+
+                # heading = f"┃{time.ctime()} │ " + \
+                #           f"Uptime: {datetime.timedelta(seconds = int(time.time()-self.up_since))}  │ " + \
+                #           f"Total Trades: {self.total_trades} ({self.total_stops_losses} SL / {self.total_take_profits} TP)" 
+                # print(f"┏{'━'*(12*8-5)}┓")
+                # line_size = 8*12
+                # print(f"{heading}{' '*(line_size-len(heading)-4)}┃")
+                # print(f"┗{'━'*(12*8-5)}┛")
+                # # for title and usd
+                # for o in outputs[0][0:2]:
+                #     print(o)
+                    
+                
+                # self.total_value = float(outputs[0][1].split('\t')[3][1:])
+                # for out in outputs:
+                #     print(out[2])
+                #     self.total_value += float(out[2].split('\t')[3][1:])
+                # if self.starting_total_value is None:
+                #     self.starting_total_value = self.total_value
+                # diff = self.total_value - self.starting_total_value
+                # sign = "+" if diff >= 0 else "-"
+                # diff = abs(diff)
+                # print(f"Total Value:\t${self.total_value:.2f}\t\tChange:\t{sign}${diff:.2f}")
+                # for out in outputs:
+                #     for o in out[3:]:
+                #         print(o)
+                # for _ in range(max(0,3-len(out[3:]))):
+                #     print("")
                        
                 self.cancel_old_crypto_orders()
             
             except errors: # (TypeError, KeyError, TimeoutError):
                 # Probably 504 server error, and robin_stocks tried subscript NoneType object 
                 # or KeyError
-                print(f"Server busy. Waiting {int(2*MAIN_LOOP_SLEEP_TIME)}s to retry.")
+                self.disp_info_feed.feedlines(f"[{time.strftime('%X')}] Server busy. Waiting {int(2*MAIN_LOOP_SLEEP_TIME)}s to retry.")
                 time.sleep(MAIN_LOOP_SLEEP_TIME)
             
 
-            print("")
+            # print("")
             time.sleep(sleep_time)
             i += 1
+
     def rsi_based_buy_sell(self, symbol):
         """ Check the RSI and possibly place a buy or sell order """
         
@@ -463,8 +515,8 @@ class RobinTrader:
         
         # TODO: Store data in instance variables and move output to mainloop or special output function:
         sign = "+" if self.symbol_pnl_percent[symbol] >= 0 else ""
-        print("Sym\tQuote\tQty\tVal\tPnL\tCost\tStop\tRSI\tBuy@\tSell@\tT|P|L\tTP|SL")
-        print(f"USD\t1\t{self.quantity_on_hand['USD']:.2f}\t${self.quantity_on_hand['USD']:.2f}\t\t\t")
+        # print("Sym\tQuote\tQty\tVal\tPnL\tCost\tStop\tRSI\tBuy@\tSell@\tT|P|L\tTP|SL")
+        self.disp_usd.feedlines(f"USD\t1\t{self.quantity_on_hand['USD']:.2f}\t${self.quantity_on_hand['USD']:.2f}\t\t\t")
         if symbol == 'BTC':
             quote_prec = 0
             quant_prec = 5
@@ -474,19 +526,19 @@ class RobinTrader:
         else:
             quote_prec = 2
             quant_prec = 5
-        print(f"{symbol}", end='\t')
-        print(f"{self.quote[symbol]:.{quote_prec}f}", end='\t')
-        print(f"{self.quantity_on_hand[symbol]:.{quant_prec}f}", end='\t')
-        print(f"${self.symbol_value[symbol]:.2f}", end='\t')
-        print(f"{sign}{self.symbol_pnl_percent[symbol]:.2f}%", end='\t')
-        print(f"${self.cost_basis[symbol]:.2f}", end='\t')
-        print(f"{self.stop_loss_quote[symbol]:.{quote_prec}f}", end='\t')
-        print(f"{self.rsi[symbol]:.2f}", end='\t')
-        print(f"{self.rsi_buy_at[symbol]:.2f}", end='\t')
-        print(f"{self.rsi_sell_at[symbol]:.2f}", end='\t')
-        print(f"{self.symbol_trades[symbol]}|{self.symbol_take_profits[symbol]}|{self.stop_losses_triggered[symbol]}",end='\t')
-        print(f"{self.take_profit_percent[symbol]}%|{self.stop_loss_percent[symbol]}%", end='\t')
-        
+        self.disp_crypto.feedlines(f"{symbol}\t" +
+                                   f"{self.quote[symbol]:.{quote_prec}f}\t" +
+                                   f"{self.quantity_on_hand[symbol]:.{quant_prec}f}\t" +
+                                   f"${self.symbol_value[symbol]:.2f}\t" +
+                                   f"{sign}{self.symbol_pnl_percent[symbol]:.2f}%\t" +
+                                   f"${self.cost_basis[symbol]:.2f}\t" +
+                                   f"{self.stop_loss_quote[symbol]:.{quote_prec}f}\t" +
+                                   f"{self.rsi[symbol]:.2f}\t" +
+                                   f"{self.rsi_buy_at[symbol]:.2f}\t" +
+                                   f"{self.rsi_sell_at[symbol]:.2f}\t" +
+                                   f"{self.symbol_trades[symbol]}|{self.symbol_take_profits[symbol]}|{self.stop_losses_triggered[symbol]}\t" +
+                                   f"{self.take_profit_percent[symbol]}%|{self.stop_loss_percent[symbol]}%")
+
         alpha = -1
         new_delta = -1
         ## Adjust stop if price is high, but only if quantity is > 0
@@ -506,16 +558,13 @@ class RobinTrader:
                 
         ## Adjust RSI buy/sell levels towards the defaults.
         self.adjust_rsi(symbol)        
-        if EXTRA_INFO:
-            print(f"{self.stop_loss_delta[symbol]:.2f}\t{alpha:.3f}\t{new_delta:.2f}")
-        
         
         ## Check for stop loss / take profits:
         if self.take_profit_percent[symbol] is not None and self.symbol_pnl_percent[symbol] > self.take_profit_percent[symbol]:
             # info = rh.order_sell_crypto_limit(symbol, quantity, round(0.999*quote,2))
             info = self.trigger_tx(symbol, quantity, round(0.99*quote, 2), side="sell", quantity_on_hand = quantity)
             if info is not None: 
-                print(f"Take profit triggered!  Selling {quantity} of {symbol}")
+                self.disp_info_feed.feedlines(f"[{time.strftime('%X')}] Take profit triggered!  Selling {quantity} of {symbol}")
                 self.total_trades += 1
                 self.total_take_profits += 1
                 self.symbol_take_profits[symbol] += 1
@@ -527,7 +576,7 @@ class RobinTrader:
             # info = rh.order_sell_crypto_limit(symbol, quantity, round(0.99*quote, 2))
             # rh.order_sell_crypto_by_quantity(symbol, round(quantity,6))
             if info is not None:
-                print(f"Stop loss triggered! Selling {quantity} of {symbol}")
+                self.disp_info_feed.feedlines(f"[{time.strftime('%X')}] Stop loss triggered! Selling {quantity} of {symbol}")
                 self.total_trades += 1
                 self.total_stops_losses += 1
                 self.stop_losses_triggered[symbol] += 1
@@ -542,7 +591,7 @@ class RobinTrader:
             if info is not None:
                 try:
                     if not isinstance(info['quantity'], list):
-                        print(f"Buying: {symbol}") # {info['quantity']:.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
+                        self.disp_info_feed.feedlines(f"[{time.strftime('%X')}] Buying: {symbol}") # {info['quantity']:.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
                         self.bump_rsi(symbol, 'buy')
                         self.total_trades += 1
                         self.symbol_trades[symbol] += 1
@@ -552,13 +601,13 @@ class RobinTrader:
         elif self.quantity_on_hand[symbol] > 0 and rsi >= self.rsi_sell_at[symbol]:
             if REQUIRE_PNL_TO_SELL[symbol] is not None and\
                 self.symbol_pnl_percent[symbol] < REQUIRE_PNL_TO_SELL[symbol]:
-                print(f"RSI sell level met for {symbol}, but PnL not high enough")
+                self.disp_info_feed.feedlines(f"[{time.strftime('%X')}] RSI sell level met for {symbol}, but PnL not high enough")
             else:
                 info = self.trigger_tx(symbol, quantity = None, price = None, side = 'sell', quantity_on_hand = quantity)
                 if info is not None:
                     try:
                         if not isinstance(info['quantity'], list):
-                            print(f"Selling: {symbol}") # {info['quantity']:0.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
+                            self.disp_info_feed.feedlines(f"[{time.strftime('%X')}] Selling: {symbol}") # {info['quantity']:0.6f} at {info['price']:.2f} ({info['quantity']*info['price']:.2f})")
                             self.bump_rsi(symbol, 'sell')
                             self.total_trades += 1     
                             self.symbol_trades[symbol] += 1
